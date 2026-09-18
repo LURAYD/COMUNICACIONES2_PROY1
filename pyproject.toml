@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "comm2"
+version = "1.0.0"
+description = "Receptor digital adaptativo sobre canal inalambrico simulado - Comunicaciones II 2026"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "matplotlib>=3.8",
+    "pandas>=2.1",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,0 +1,20 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Ficheros de intercambio con GNU Radio (se regeneran; pesan MB)
+grc/io/*.cf32
+grc/io/*.bin
+grc/io/*.npz
+
+# Flowgraphs compilados por grcc
+grc/*.py
+
+# Documento explicativo LaTeX
+latex/
+
+# Claude config
+.claude/

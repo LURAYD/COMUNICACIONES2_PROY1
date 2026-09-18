@@ -1,0 +1,274 @@
+options:
+  parameters:
+    author: Comunicaciones II 2026 - Proyecto 1
+    catch_exceptions: 'True'
+    category: '[GRC Hier Blocks]'
+    cmake_opt: ''
+    comment: "Validacion cruzada (seccion 11 de la guia).\nGNU Radio actua como TRANSMISOR\
+      \ + CANAL: genera QPSK con conformacion RRC,\nla pasa por un canal multitrayectoria\
+      \ + AWGN y escribe tres ficheros que\nel script experiments/exp6_validacion_grc.py\
+      \ analiza en Python."
+    copyright: ''
+    description: QPSK + RRC + canal multitrayectoria, volcado a fichero
+    gen_cmake: 'On'
+    gen_linking: dynamic
+    generate_options: no_gui
+    hier_block_src_path: '.:'
+    id: tx_qpsk_canal
+    max_nouts: '0'
+    output_language: python
+    placement: (0,0)
+    qt_qss_theme: ''
+    realtime_scheduling: ''
+    run: 'True'
+    run_command: '{python} -u {filename}'
+    run_options: run
+    sizing_mode: fixed
+    thread_safe_setters: ''
+    title: TX QPSK + canal (Comunicaciones II)
+    window_size: (1000,1000)
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 8]
+    rotation: 0
+    state: enabled
+
+blocks:
+- name: samp_rate
+  id: variable
+  parameters:
+    comment: Frecuencia de muestreo del simulador [Hz]
+    value: '1000000'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [200, 12]
+    rotation: 0
+    state: enabled
+- name: sps
+  id: variable
+  parameters:
+    comment: Muestras por simbolo
+    value: '8'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [304, 12]
+    rotation: 0
+    state: enabled
+- name: excess_bw
+  id: variable
+  parameters:
+    comment: Roll-off del RRC
+    value: '0.35'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [384, 12]
+    rotation: 0
+    state: enabled
+- name: n_sym
+  id: variable
+  parameters:
+    comment: Simbolos QPSK a generar
+    value: '20000'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [488, 12]
+    rotation: 0
+    state: enabled
+- name: noise_volt
+  id: variable
+  parameters:
+    comment: "Tension de ruido del canal.\nEl script de analisis ESTIMA la SNR\nrealmente\
+      \ presente en el fichero, asi que\nno hace falta calibrarla a mano: basta\ncon\
+      \ barrer este valor."
+    value: '0.10'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [592, 12]
+    rotation: 0
+    state: enabled
+- name: freq_off
+  id: variable
+  parameters:
+    comment: Offset de frecuencia normalizado (ciclos/muestra)
+    value: '0.0'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [712, 12]
+    rotation: 0
+    state: enabled
+- name: ch_taps
+  id: variable
+  parameters:
+    comment: "Perfil multitrayectoria a TASA DE MUESTREO.\nDebe coincidir con el que\
+      \ genera\ncomm2.channel.PROFILES['moderate'].taps(sps).\nexp6_validacion_grc.py\
+      \ los imprime listos\npara pegar aqui."
+    value: '[1.0+0.0j]'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [840, 12]
+    rotation: 0
+    state: enabled
+- name: qpsk_const
+  id: variable_constellation
+  parameters:
+    comment: ''
+    const_points: '[-1-1j, -1+1j, 1+1j, 1-1j]'
+    dims: '1'
+    normalization: digital.constellation.AMPLITUDE_NORMALIZATION
+    precision: '8'
+    rot_sym: '4'
+    soft_dec_lut: None
+    sym_map: '[0, 1, 3, 2]'
+    type: qpsk
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [200, 100]
+    rotation: 0
+    state: enabled
+- name: analog_random_source_x_0
+  id: analog_random_source_x
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: "Fuente de datos.\nCada byte da 4 simbolos QPSK."
+    max: '256'
+    maxoutbuf: '0'
+    min: '0'
+    minoutbuf: '0'
+    num_samps: int(n_sym/4)
+    repeat: 'False'
+    type: byte
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [40, 220]
+    rotation: 0
+    state: enabled
+- name: blocks_file_sink_bytes
+  id: blocks_file_sink
+  parameters:
+    affinity: ''
+    alias: ''
+    append: 'False'
+    comment: "Bytes transmitidos: los necesita el\nscript de Python para calcular la\
+      \ BER."
+    file: io/grc_tx_bytes.bin
+    type: byte
+    unbuffered: 'False'
+    vlen: '1'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [264, 320]
+    rotation: 0
+    state: enabled
+- name: digital_constellation_modulator_0
+  id: digital_constellation_modulator
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: "Mapeo QPSK Gray + conformacion RRC.\nEquivale a comm2.modulation +\n\
+      comm2.pulse.pulse_shape."
+    constellation: qpsk_const
+    differential: 'False'
+    excess_bw: excess_bw
+    log: 'False'
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    samples_per_symbol: sps
+    truncate: 'False'
+    verbose: 'False'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [264, 204]
+    rotation: 0
+    state: enabled
+- name: blocks_file_sink_tx
+  id: blocks_file_sink
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: "Senal transmitida limpia (complex64).\nSe compara su PSD con la de Python."
+    file: io/grc_tx_signal.cf32
+    type: complex
+    unbuffered: 'False'
+    vlen: '1'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [560, 132]
+    rotation: 0
+    state: enabled
+- name: channels_channel_model_0
+  id: channels_channel_model
+  parameters:
+    affinity: ''
+    alias: ''
+    block_tags: 'False'
+    comment: "Canal: AWGN + multitrayectoria + offset\nde frecuencia + error de reloj\
+      \ (epsilon)."
+    epsilon: '1.0'
+    freq_offset: freq_off
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    noise_voltage: noise_volt
+    seed: '2026'
+    taps: ch_taps
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [552, 204]
+    rotation: 0
+    state: enabled
+- name: blocks_file_sink_rx
+  id: blocks_file_sink
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: "Senal recibida tras el canal (complex64).\nEntrada del analisis en Python."
+    file: io/grc_rx_signal.cf32
+    type: complex
+    unbuffered: 'False'
+    vlen: '1'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [816, 220]
+    rotation: 0
+    state: enabled
+
+connections:
+- [analog_random_source_x_0, '0', digital_constellation_modulator_0, '0']
+- [analog_random_source_x_0, '0', blocks_file_sink_bytes, '0']
+- [digital_constellation_modulator_0, '0', channels_channel_model_0, '0']
+- [digital_constellation_modulator_0, '0', blocks_file_sink_tx, '0']
+- [channels_channel_model_0, '0', blocks_file_sink_rx, '0']
+
+metadata:
+  file_format: 1
+  grc_version: 3.10.12.0
