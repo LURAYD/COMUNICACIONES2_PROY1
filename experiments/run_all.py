@@ -21,6 +21,8 @@ import exp3_ecualizacion
 import exp4_robustez
 import exp5_modulacion
 import exp6_validacion_grc
+import exp7_isi_canal
+import exp8_ecualizador_isi
 from _common import ROOT, banner
 
 PASOS = {
@@ -31,6 +33,8 @@ PASOS = {
     "4": ("Robustez", exp4_robustez.main),
     "5": ("Comparacion de modulaciones", exp5_modulacion.main),
     "6": ("Validacion cruzada con GNU Radio", exp6_validacion_grc.main),
+    "7": ("ISI frente a la respuesta al impulso h", lambda: exp7_isi_canal.main([])),
+    "8": ("Ecualizador: canal ideal frente a canal h", lambda: exp8_ecualizador_isi.main([])),
 }
 
 

@@ -82,15 +82,56 @@ def coarse_gain_phase(r: np.ndarray, ref: np.ndarray) -> complex:
     return num / (den + 1e-12)
 
 
-def symbol_rate_channel(h: np.ndarray, g: np.ndarray, sps: int) -> np.ndarray:
-    """Canal equivalente a tasa de simbolo: (h * g * h) diezmado en el pico."""
+def symbol_rate_channel(h: np.ndarray, g: np.ndarray, sps: int,
+                        phase: str = "peak") -> np.ndarray:
+    """Canal equivalente a tasa de simbolo: (h * g * h) diezmado.
+
+    phase = 'peak'   diezma en la muestra de mayor modulo (lo que usan ZF/MMSE);
+    phase = 'cursor' diezma alineado con el trayecto mas fuerte del canal, que
+                     es el instante de Nyquist en el que se engancha Gardner.
+    Con ecos asimetricos el pico de |h*g*h| se desplaza respecto al instante de
+    Nyquist (h = [0.2, 1, 0, 0.8] lo adelanta una muestra con sps = 8) y 'peak'
+    describe una ISI distinta de la que ve el receptor. Con 'cursor' un canal
+    espaciado a T devuelve exactamente sus coeficientes normalizados.
+    """
     tot = np.convolve(np.convolve(h, g), h)
-    pk = int(np.argmax(np.abs(tot)))
+    if phase == "cursor":
+        pk = int(np.argmax(np.abs(g))) + (h.size - 1)
+    else:
+        pk = int(np.argmax(np.abs(tot)))
     c = tot[pk % sps:: sps]
     # recorta colas despreciables (< -40 dB del pico)
     thr = 10 ** (-40 / 20) * np.max(np.abs(c))
     nz = np.where(np.abs(c) > thr)[0]
     return c[nz[0]: nz[-1] + 1] if nz.size else c
+
+
+def equalizer_breakdown(r: "LinkResult", n_win: int = 8) -> dict:
+    """Reparte el error de salida del ecualizador en ISI residual y ruido.
+
+    c = canal a tasa de simbolo que ve el ecualizador, medido por minimos
+    cuadrados sobre la carga util con los simbolos conocidos; f = conj(w) es el
+    filtro del ecualizador y q = c * f la respuesta conjunta. Con simbolos de
+    energia 1:
+        ISI   = sum_{k != 0} |q_k|^2 / |q_0|^2
+        ruido = sigma_in^2 * sum |f|^2 / |q_0|^2
+    sigma_in^2 es el residuo del ajuste: el ruido que realmente entra al
+    ecualizador (sigma^2 del canal no sirve, la cadena aplica ganancias
+    intermedias). Sin ecualizador, f = [1] y q = c.
+    """
+    ref = r.frame.payload
+    rx = r.sym_pre_eq[r.frame.n_train:]
+    c, s2_in = metrics.estimate_symbol_channel(rx, ref, n_win, n_win)
+    f = np.conj(r.eq.w)
+    q = np.convolve(f, c)
+    q0 = float(np.max(np.abs(q)) ** 2)
+    return {
+        "c": c, "f": f, "q": q, "sigma2_in": s2_in,
+        "isi_rel": float((np.sum(np.abs(q) ** 2) - q0) / q0),
+        "noise_rel": float(s2_in * np.sum(np.abs(f) ** 2) / q0),
+        "noise_gain_db": float(10 * np.log10(np.sum(np.abs(f) ** 2) + 1e-30)),
+        "mse": float(r.stats["mse"]),
+    }
 
 
 # ---------------------------------------------------------------------------

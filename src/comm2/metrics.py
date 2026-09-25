@@ -173,6 +173,94 @@ def eye_opening(x: np.ndarray, sps: int = 1, offset: int | None = None) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Interferencia intersimbolica
+# ---------------------------------------------------------------------------
+
+
+def isi_metrics(c: np.ndarray) -> dict:
+    """Medidas de ISI de un canal equivalente a tasa de simbolo c[k].
+
+    El cursor es el coeficiente de mayor modulo (el que toma el receptor como
+    referencia de temporizacion); todos los demas son ISI.
+
+      sir_db          |c0|^2 / sum_{k!=0} |ck|^2          senal util / ISI
+      peak_distortion D = sum_{k!=0} |ck| / |c0|           D >= 1 -> ojo cerrado (BPSK)
+      eye_worst_qpsk  1 - sum_{k!=0} (|Re c'k| + |Im c'k|), c' = c/c0
+                      apertura vertical de peor caso del carril I en QPSK,
+                      normalizada al nivel sin ISI (1 = ojo limpio, <= 0 cerrado)
+      energy          sum |ck|^2: potencia util que entrega el canal (1 si la
+                      normalizacion del perfil conserva la SNR)
+    """
+    c = np.atleast_1d(np.asarray(c, dtype=complex))
+    i0 = int(np.argmax(np.abs(c)))
+    c0 = c[i0]
+    rest = np.delete(c, i0)
+    isi = float(np.sum(np.abs(rest) ** 2))
+    cn = rest / c0
+    return {
+        "cursor": i0, "n_pre": i0, "n_post": int(c.size - i0 - 1),
+        "c0": complex(c0),
+        "sir_db": float(10 * np.log10(abs(c0) ** 2 / isi)) if isi > 0 else np.inf,
+        "peak_distortion": float(np.sum(np.abs(rest)) / abs(c0)),
+        "eye_worst_qpsk": float(1 - np.sum(np.abs(cn.real) + np.abs(cn.imag))),
+        "energy": float(np.sum(np.abs(c) ** 2)),
+    }
+
+
+def eye_opening_known(rx: np.ndarray, ref: np.ndarray, q: float = 0.0) -> float:
+    """Apertura vertical del ojo (carril I) agrupando por el simbolo TRANSMITIDO.
+
+    `eye_opening` agrupa por el signo de la muestra recibida y por tanto nunca
+    baja de 0 aunque el ojo este cerrado. Aqui, con los simbolos conocidos
+    (rx alineado con ref, cursor en el retardo 0), un ojo cerrado da < 0.
+    q es el percentil de cada grupo (0 = peor caso observado). Normalizada al
+    nivel medio, comparable con isi_metrics()['eye_worst_qpsk'].
+    """
+    n = min(rx.size, ref.size)
+    y, s = np.real(rx[:n]), np.real(ref[:n])
+    pos, neg = y[s > 0], y[s < 0]
+    level = (np.mean(pos) - np.mean(neg)) / 2.0
+    return float((np.percentile(pos, 100 * q) - np.percentile(neg, 100 * (1 - q)))
+                 / (2.0 * level + 1e-12))
+
+
+def mmse_le_snr_db(c: np.ndarray, esn0_db: float, n_freq: int = 4096) -> float:
+    """SNR maxima de CUALQUIER ecualizador lineal (MMSE, infinitos taps).
+
+    MMSE = integral_{-1/2}^{1/2} df / (1 + Es/N0 |C(f)|^2) y SNR = 1/MMSE, que
+    acota la SNR medida como 1/EVM^2 (error frente al simbolo transmitido). Con
+    canal plano de energia 1 vale 1 + Es/N0. Superarla exige un ecualizador no
+    lineal (DFE, MLSE).
+    """
+    f = np.linspace(-0.5, 0.5, n_freq, endpoint=False)
+    C = np.exp(-2j * np.pi * np.outer(f, np.arange(np.size(c)))) @ np.asarray(c)
+    snr = 10 ** (esn0_db / 10)
+    return float(-10 * np.log10(np.mean(1 / (1 + snr * np.abs(C) ** 2))))
+
+
+def estimate_symbol_channel(rx: np.ndarray, ref: np.ndarray, n_pre: int = 8,
+                            n_post: int = 8) -> tuple[np.ndarray, float]:
+    """Estima por minimos cuadrados el canal a tasa de simbolo que vio `rx`.
+
+    Ajusta rx[n] ~ sum_{k=-n_pre}^{n_post} c[k] ref[n-k] con los simbolos
+    transmitidos conocidos. Es la medida *experimental* de la ISI: sale de la
+    senal recibida, sin conocer el canal. Devuelve (c, varianza del residuo);
+    c[n_pre] corresponde al retardo 0 y el residuo es ruido mas todo lo que un
+    FIR lineal no explica (jitter de temporizacion, deriva de fase).
+    """
+    n = min(rx.size, ref.size)
+    L = n_pre + n_post + 1
+    rows = np.arange(n_post, n - n_pre)
+    # columna j <-> retardo k = j - n_pre, simbolo ref[n - k]
+    idx = rows[:, None] - (np.arange(L)[None, :] - n_pre)
+    A = ref[idx]
+    b = rx[rows]
+    c, *_ = np.linalg.lstsq(A, b, rcond=None)
+    resid = b - A @ c
+    return c, float(np.mean(np.abs(resid) ** 2))
+
+
+# ---------------------------------------------------------------------------
 # Eficiencia espectral
 # ---------------------------------------------------------------------------
 

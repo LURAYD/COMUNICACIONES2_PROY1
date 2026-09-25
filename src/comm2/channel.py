@@ -96,6 +96,35 @@ class MultipathProfile:
             g = g / np.sqrt(np.sum(np.abs(g) ** 2))
         return g
 
+    @classmethod
+    def from_taps(cls, h, spacing_sym: float = 1.0, name: str | None = None,
+                  normalize: bool = True) -> "MultipathProfile":
+        """Perfil a partir de una respuesta al impulso discreta h[k].
+
+        h[k] es el coeficiente (real o complejo) del trayecto con retardo
+        k * spacing_sym periodos de simbolo. Por ejemplo h = [0, 0.2, 1, 0, 0.8]
+        con spacing_sym = 1 es un canal espaciado a T con el cursor en k = 2,
+        un precursor de 0.2 en k = 1 y un postcursor de 0.8 en k = 4. Los ceros
+        solo ocupan posicion (retardo): no generan trayecto. Un coeficiente
+        negativo es un trayecto con fase pi.
+
+        Con espaciado entero (multiplo de T) la normalizacion sum|g|^2 = 1
+        conserva exactamente la potencia util, porque el pulso RC es de
+        Nyquist; con espaciado fraccional deja de ser exacta.
+        """
+        h = np.atleast_1d(np.asarray(h, dtype=complex))
+        k = np.flatnonzero(np.abs(h) > 0)
+        if k.size == 0:
+            raise ValueError("la respuesta al impulso del canal es nula")
+        paso = "" if spacing_sym == 1.0 else f" (paso {spacing_sym:g} T)"
+        return cls(
+            name=name or f"h = [{format_taps(h)}]{paso}",
+            delays_sym=tuple(float(i * spacing_sym) for i in k),
+            gains_db=tuple(float(g) for g in 20 * np.log10(np.abs(h[k]))),
+            phases_rad=tuple(float(a) for a in np.angle(h[k])),
+            normalize=normalize,
+        )
+
     def describe(self, sps: int) -> str:
         g = self.taps(sps)
         return (f"{self.name}: retardos={self.delays_sym} T, ganancias={self.gains_db} dB, "
@@ -112,6 +141,90 @@ PROFILES = {
     "severe": MultipathProfile("Severo (eco casi coherente)", (0.0, 1.0, 2.3, 3.6),
                                (0.0, -1.5, -4.0, -7.0), (0.0, 2.6, 1.2, -0.9)),
 }
+
+
+def format_taps(h) -> str:
+    """Texto compacto de un vector de coeficientes: '0, 0.2, 1, 0, 0.8'."""
+    out = []
+    for c in np.atleast_1d(np.asarray(h, dtype=complex)):
+        out.append(f"{c.real:g}" if c.imag == 0 else f"{c:g}".strip("()"))
+    return ", ".join(out)
+
+
+def parse_taps(text: str) -> np.ndarray:
+    """Lee una respuesta al impulso escrita a mano.
+
+    Acepta '0,0.2,1,0,0.8', '0 0.2 1 0 0.8', '[0, 0.2, 1]', coeficientes
+    complejos ('0.3+0.2j' o '0.3+0.2i') y coma decimal si los coeficientes se
+    separan con punto y coma ('0;0,2;1;0;0,8').
+    """
+    s = text.strip().strip("[]()").strip()
+    if ";" in s:
+        parts = [t.replace(",", ".") for t in s.split(";")]
+    else:
+        parts = s.replace(",", " ").split()
+    try:
+        h = np.array([complex(t.strip().replace("i", "j")) for t in parts if t.strip()])
+    except ValueError as e:
+        raise ValueError(f"no se entiende la respuesta al impulso '{text}'") from e
+    if h.size == 0:
+        raise ValueError("respuesta al impulso vacia")
+    return h.real.copy() if np.all(h.imag == 0) else h
+
+
+def random_taps(n_taps: int = 5, seed: int = 0, cursor: int | None = None,
+                max_echo: float = 0.6, complex_taps: bool = False) -> np.ndarray:
+    """Respuesta al impulso aleatoria y REPRODUCIBLE (misma semilla, mismo h).
+
+    El cursor vale 1 y se coloca en `cursor` (por defecto el centro); los ecos
+    se sortean uniformes en [-max_echo, max_echo] (reales) o con modulo
+    uniforme en [0, max_echo] y fase uniforme (complejos). Con max_echo < 1 el
+    cursor sigue siendo el trayecto dominante. Se redondea a 2 decimales para
+    que el h impreso sea exactamente el h simulado y se pueda reutilizar a mano.
+    """
+    rng = np.random.default_rng(seed)
+    cursor = n_taps // 2 if cursor is None else int(cursor)
+    if not 0 <= cursor < n_taps:
+        raise ValueError(f"cursor {cursor} fuera de 0..{n_taps - 1}")
+    if complex_taps:
+        h = rng.uniform(0, max_echo, n_taps) * np.exp(2j * np.pi * rng.uniform(size=n_taps))
+        h = np.round(h.real, 2) + 1j * np.round(h.imag, 2)
+    else:
+        h = np.round(rng.uniform(-max_echo, max_echo, n_taps), 2)
+    h[cursor] = 1.0
+    return h
+
+
+def get_profile(spec, spacing_sym: float = 1.0) -> MultipathProfile:
+    """Resuelve un perfil multitrayecto a partir de cualquier forma de darlo.
+
+    spec puede ser un MultipathProfile, el nombre de un perfil predefinido
+    ('flat', 'mild', 'moderate', 'severe'), una respuesta al impulso como
+    texto ('0,0.2,1,0,0.8', admite prefijo 'h:' o 'h='), un canal aleatorio
+    reproducible ('aleatorio:7' -> random_taps(seed=7)) o una secuencia.
+    """
+    if isinstance(spec, MultipathProfile):
+        return spec
+    if isinstance(spec, str):
+        key = spec.strip()
+        if key in PROFILES:
+            return PROFILES[key]
+        low = key.lower()
+        if low.startswith(("aleatorio:", "rand:")):
+            seed = int(key.split(":", 1)[1])
+            h = random_taps(seed=seed)
+            return MultipathProfile.from_taps(
+                h, spacing_sym, name=f"aleatorio (semilla {seed}): h = [{format_taps(h)}]")
+        if low.startswith(("h:", "h=")):
+            key = key[2:]
+        try:
+            h = parse_taps(key)
+        except ValueError:
+            raise ValueError(f"perfil desconocido '{spec}': use uno de "
+                             f"{list(PROFILES)} o una respuesta al impulso "
+                             f"como '0,0.2,1,0,0.8'") from None
+        return MultipathProfile.from_taps(h, spacing_sym)
+    return MultipathProfile.from_taps(spec, spacing_sym)
 
 
 def apply_fir_channel(x: np.ndarray, taps: np.ndarray) -> np.ndarray:
