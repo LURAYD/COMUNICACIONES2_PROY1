@@ -30,6 +30,78 @@ Dependencias: `numpy`, `scipy`, `matplotlib`, `pandas`.
 > ambos mediante ficheros `complex64`, que es exactamente el formato interno de
 > GNU Radio. Ver [`grc/README.md`](grc/README.md).
 
+## Banco de pruebas
+
+![Banco de pruebas](docs/img/banco_de_pruebas.png)
+
+Aplicación de escritorio para conducir el enlace en vivo. Doble clic en
+**`Banco de pruebas.bat`**, o desde la línea de órdenes:
+
+```bash
+pip install -e .[gui]
+python -m app
+```
+
+Sin navegador, sin servidor y sin puerto: es una ventana Qt, la misma biblioteca
+con la que GNU Radio dibuja sus sumideros de constelación y espectro.
+
+La idea que la organiza: **la cadena TX → canal → RX es la barra de
+navegación**. Se elige un punto de derivación y los instrumentos muestran la
+señal *ahí*. Los cinco puntos a tasa de símbolo contienen los mismos símbolos,
+índice a índice, de modo que al cambiar de etapa cada punto se interpola desde
+su posición anterior hasta la nueva: se ve el símbolo *k* salir del borrón de
+ISI y aterrizar sobre su punto de la constelación. Debajo de los nodos va el
+perfil de apertura del ojo a lo largo de las ocho etapas — una sola magnitud,
+un solo eje — que dibuja de un vistazo el argumento del proyecto: el ojo nace
+abierto, el canal lo cierra y el ecualizador lo vuelve a abrir.
+
+Esto es posible por un hecho medido, no por una decisión de interfaz: una
+corrida completa de `run_link()` tarda **0,18 s** con 4 000 símbolos, así que el
+enlace entero se recalcula mientras se arrastra un control. El trabajo ocurre en
+un hilo aparte que descarta las peticiones obsoletas, de modo que al soltar el
+control siempre se dibuja el estado final y nunca se acumula cola.
+
+Tres vistas:
+
+| Vista | Qué hace |
+|---|---|
+| **Banco de pruebas** | Constelación, ojo, espectro y convergencia en los ocho puntos de derivación, con la lectura de BER, SER, EVM, MSE, convergencia y coste. |
+| **Campaña** | Los experimentos 1–5 de la guía como barridos que se dibujan mientras se calculan. Los puntos sin errores se dibujan sobre la línea de suelo `1/(k·N)`, marcados como cota y no como valor. |
+| **GNU Radio** | Compila el flowgraph con `grcc`, lo ejecuta con el intérprete de radioconda, lee el `.cf32` y superpone su espectro sobre el del simulador. |
+
+### Sin interfaz
+
+Para quedarse solo con las imágenes, sin abrir nada: doble clic en
+**`Guardar imagenes.bat`**, o
+
+```bash
+python -m app --export salida --escenario C --ebn0 12 --eq lms
+```
+
+Corre la simulación, renderiza los instrumentos fuera de pantalla y escribe la
+cadena, las ocho constelaciones, los tres diagramas de ojo medibles, el espectro,
+la convergencia y un `medidas.csv` con BER, SER, EVM, MSE, convergencia, coste y
+la apertura del ojo en cada punto. No sustituye a `experiments/run_all.py`, que
+genera las figuras del informe en matplotlib: esto genera las del instrumento,
+que son las de la presentación.
+
+### Tema
+
+El tema claro es el de serie. El fondo es la ilustración de `app/assets/fondo.png`
+bajo un velo blanco; sus tintas planas se midieron sobre la propia imagen y
+gobiernan el chasis y el color de la traza de señal. Las series comparadas usan
+en cambio la paleta documentada de visualización de datos, porque la ilustración
+—medido— no puede darlas: sus tonos se agrupan en 247/265/281/286, todos
+azul-violeta, y como conjunto categórico no separa cinco series.
+
+Para portátil o sala a oscuras hay un instrumento de fósforo:
+
+```bash
+python -m app --tema oscuro
+```
+
+![Tema oscuro](docs/img/tema_oscuro.png)
+
 ## Uso rápido
 
 ```bash
@@ -69,6 +141,15 @@ src/comm2/          biblioteca de simulación
   link.py           cadena TX-canal-RX completa y Monte Carlo
   scenarios.py      escenarios A, B, C y D
   plots.py          figuras normalizadas para el informe
+
+app/                banco de pruebas de escritorio (PySide6 + pyqtgraph)
+  theme.py          paleta, tipografía y hoja de estilo del instrumento
+  engine.py         hilo de simulación y extracción de puntos de derivación
+  signalpath.py     la cadena como barra de navegación + perfil del ojo
+  displays.py       constelación, ojo, espectro y convergencia
+  controls.py       rail de parámetros con su lógica de activación
+  bench.py          vista en vivo; campaign.py  barridos; grcview.py  GNU Radio
+  grc_driver.py     guion ejecutado por el intérprete de radioconda
 
 experiments/        campaña de simulación (un script por experimento)
 tests/              pruebas de la biblioteca y de reproducibilidad de la campaña

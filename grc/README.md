@@ -13,10 +13,47 @@ ambigüedad.
 > 3.10**. Están verificados en tres niveles: estructura YAML, coherencia de las
 > conexiones, y —bloque por bloque— que el `id` y todos los nombres de parámetro
 > coinciden con las definiciones oficiales de `maint-3.10`
-> (`gr-digital/grc/*.block.yml` y equivalentes). Lo que **no** se ha podido
-> probar es la ejecución, porque la máquina donde se desarrollaron no tiene
-> GNU Radio instalado: al abrirlos por primera vez, comprueba que ningún bloque
-> salga en rojo antes de ejecutar.
+> (`gr-digital/grc/*.block.yml` y equivalentes).
+>
+> **Ejecución comprobada.** Ambos flowgraphs compilan sin error con `grcc` bajo
+> **GNU Radio 3.10.9.2** (radioconda, Python 3.11.7), y `tx_qpsk_canal.grc` se
+> ha ejecutado de principio a fin: 0,15 s de corrida y 160 000 muestras escritas
+> en `io/grc_tx_signal.cf32`, con 159 932 en `io/grc_rx_signal.cf32` tras el
+> canal. `rx_qpsk_desde_python.grc` lleva sumideros Qt y se abre en Companion,
+> donde muestra sus gráficas en ventanas propias de GNU Radio.
+>
+> **Resultado de la comparación.** Con los coeficientes del canal inyectados
+> desde Python y 0,10 V de ruido:
+>
+> | Magnitud | Python | GNU Radio | Dif. |
+> |---|---|---|---|
+> | Ancho de banda ocupado (99 %) [kHz] | 145,51 | 145,51 | +0,0 % |
+> | PAPR [dB] | 3,99 | 3,92 | −1,5 % |
+>
+> El ancho de banda coincide hasta la última cifra: la conformación RRC está
+> implementada igual en las dos herramientas. El ciclo completo tarda ~2 s.
+>
+> Fuera de la banda de paso sí hay una diferencia real: Python muestra los
+> lóbulos laterales del RRC entre −50 y −70 dB y GNU Radio cae en vertical,
+> porque el `Constellation Modulator` usa un filtro de longitud distinta al
+> `span = 10` símbolos de este proyecto. Dentro de la banda son
+> indistinguibles.
+>
+> **Sobre la SNR estimada.** El estimador M2M4 supone módulo constante, así que
+> hay que aplicarlo *tras el filtro adaptado y el diezmado a tasa de símbolo*,
+> no sobre la señal sobremuestreada: medido sobre la misma captura da 2,98 dB
+> mal aplicado y 5,07 dB bien aplicado. Aun así cuenta la ISI del multitrayecto
+> como ruido, de modo que es una cota inferior — y por eso apenas se mueve al
+> variar el ruido del canal (5,01 dB sin ruido frente a 4,67 dB con 0,60 V).
+>
+> El banco de pruebas de escritorio (`app/`, pestaña **GNU Radio**) hace todo
+> ese ciclo con un botón: compila, ejecuta con el intérprete de radioconda, lee
+> el `.cf32` y superpone el espectro sobre el del simulador de Python. Inyecta
+> además los coeficientes del canal desde Python mediante `set_ch_taps`, de modo
+> que ya no hace falta pegar a mano el contenido de `ch_taps_para_grc.txt` en la
+> variable del flowgraph — y, más importante, garantiza que ambas herramientas
+> ven exactamente el mismo canal, sin lo cual cualquier diferencia de BER sería
+> inatribuible.
 >
 > Esa verificación destapó un cambio de API que habría roto el flowgraph:
 > **GNU Radio 3.9 eliminó `digital.lms_dd_equalizer_cc` y

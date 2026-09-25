@@ -5,3 +5,9 @@ numpy>=1.26
 scipy>=1.11
 matplotlib>=3.8
 pandas>=2.1
+
+# Banco de pruebas de escritorio (app/). Opcional: el simulador y la campana
+# de experimentos funcionan sin Qt.
+#   pip install -e .[gui]
+PySide6>=6.6
+pyqtgraph>=0.13

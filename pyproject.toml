@@ -14,5 +14,14 @@ dependencies = [
     "pandas>=2.1",
 ]
 
+[project.optional-dependencies]
+# Banco de pruebas de escritorio (app/). El simulador de src/comm2 no depende
+# de Qt: quien solo quiera correr la campana por linea de comandos no necesita
+# instalar esto.
+gui = [
+    "PySide6>=6.6",
+    "pyqtgraph>=0.13",
+]
+
 [tool.setuptools.packages.find]
 where = ["src"]
