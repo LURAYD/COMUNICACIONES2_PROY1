@@ -59,14 +59,22 @@ def min_bits_for_ber(target_ber: float, n_errors: int = 100) -> int:
 
 
 def symbol_mse(rx: np.ndarray, ref: np.ndarray) -> float:
-    """Error cuadratico medio de simbolo (tras alineacion de fase/ganancia)."""
+    """Error cuadratico medio de simbolo (tras alineacion de fase/ganancia).
+
+    Normalizado por |a|^2 P_ref y saturado en 1 (EVM = 100 %): si la
+    constelacion gira (CFO sin corregir) la ganancia optima `a` tiende a 0 y el
+    cociente explotaba (EVM de miles de %). Un EVM >= 100 % solo significa que
+    el receptor no engancho, asi que se acota ahi.
+    """
     n = min(rx.size, ref.size)
     rx, ref = rx[:n], ref[:n]
+    if n == 0 or not (np.all(np.isfinite(rx)) and np.all(np.isfinite(ref))):
+        return 1.0
     a = np.vdot(ref, rx) / (np.vdot(ref, ref) + 1e-12)   # ganancia compleja optima
     den = np.mean(np.abs(a * ref) ** 2)
     if den < 1e-15:                      # el receptor no engancho: MSE saturado
         return 1.0
-    return float(np.mean(np.abs(rx - a * ref) ** 2) / den)
+    return float(min(np.mean(np.abs(rx - a * ref) ** 2) / den, 1.0))
 
 
 def evm_percent(rx: np.ndarray, ref: np.ndarray) -> float:

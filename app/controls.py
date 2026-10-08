@@ -241,9 +241,10 @@ class Controls(QScrollArea):
             self._mark_h(str(e).split(":")[0])
             return
         self._mark_h(None)
-        if txt != self._h_ok:
-            self._h_ok = txt
-            self._show_h()
+        changed = txt != self._h_ok
+        self._h_ok = txt
+        self._show_h()
+        if changed:
             self.settled.emit()
 
     def _mark_h(self, err: Optional[str]) -> None:
@@ -253,6 +254,8 @@ class Controls(QScrollArea):
         if err:
             self.h_note.setText(f"no se entiende: {err}.\nSigue h = [{self._h_fmt()}]")
             self.h_note.setStyleSheet(f"color: {T.CRITICAL}")
+        else:
+            self._show_h()
 
     def _h_fmt(self) -> str:
         from comm2.channel import format_taps, parse_taps, random_taps

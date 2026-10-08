@@ -12,13 +12,12 @@ from .bench import Bench
 from .campaign import Campaign
 from .controls import Controls
 from .engine import SimController, compare_isi
-from .grcview import GrcView
 from .isiview import IsiView
 from .widgets import HRule, Segmented, panel_label, text_label
 
 VIEWS = [("bench", "Banco de pruebas"), ("isi", "ISI y ecualizador"),
-         ("camp", "Campaña"), ("grc", "GNU Radio")]
-VIEW_INDEX = {"bench": 0, "isi": 1, "camp": 2, "grc": 3}
+         ("camp", "Campaña")]
+VIEW_INDEX = {"bench": 0, "isi": 1, "camp": 2}
 
 
 class Header(QWidget):
@@ -92,11 +91,9 @@ class MainWindow(QMainWindow):
         self.bench = Bench()
         self.isi = IsiView()
         self.campaign = Campaign(self.controls)
-        self.grc = GrcView()
         self.stack.addWidget(self.bench)
         self.stack.addWidget(self.isi)
         self.stack.addWidget(self.campaign)
-        self.stack.addWidget(self.grc)
         bh.addWidget(self.stack, 1)
 
         rv.addWidget(body, 1)
@@ -134,8 +131,6 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentIndex(VIEW_INDEX[key])
         # El rail sigue vivo en la campana porque el barrido USA sus valores
         # (taps, paso, perfil, entrenamiento) para todo salvo el eje que barre.
-        # Solo se desactiva en la vista de GNU Radio, que no los consulta.
-        self.controls.setEnabled(key in ("bench", "isi", "camp"))
         self.controls.set_view(key)
         # Al volver a una vista se recalcula: el rail pudo cambiar mientras
         # tanto y la vista no puede enseñar un resultado de otros parámetros.
@@ -152,7 +147,6 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, e):  # noqa: N802
         self.campaign.stop()
-        self.grc.stop()
         self.sim.shutdown()
         self.isi_sim.shutdown()
         super().closeEvent(e)

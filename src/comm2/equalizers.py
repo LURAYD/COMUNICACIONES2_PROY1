@@ -51,7 +51,7 @@ class EqResult:
     ref_tap: int
     learning_curve: np.ndarray = field(default=None)   # |e|^2 suavizado [dB]
     steady_mse_db: float = np.nan
-    convergence_symbols: int = -1
+    convergence_symbols: int = -1   # -1: no converge / no aplica (none, zf, mmse)
     flops_per_symbol: dict = field(default_factory=dict)
 
     def time_to_reach(self, mse_db: float, hold: int = 16) -> int:
@@ -117,19 +117,45 @@ def _smooth(x: np.ndarray, win: int = 32) -> np.ndarray:
     return (c[i + 1] - c[lo]) / (i - lo + 1)
 
 
-def _analyze(err2: np.ndarray, n_train: int) -> tuple[np.ndarray, float, int]:
+def _analyze(err2: np.ndarray, n_train: int, adaptive: bool = True,
+             diverged: bool = False, check_head: bool = True) -> tuple[np.ndarray, float, int]:
     """Curva de aprendizaje, MSE residual y tiempo de convergencia.
 
     Convergencia = primer simbolo a partir del cual la curva suavizada se
-    mantiene dentro de 3 dB del MSE de regimen permanente.
+    mantiene dentro de 3 dB del MSE de regimen permanente. Se devuelve -1 si:
+      - el ecualizador no es adaptativo (`adaptive=False`: none/zf/mmse), pues
+        no hay proceso de convergencia que medir;
+      - el filtro diverge (`diverged`, o con `check_head` la curva termina mas de
+        3 dB peor que como empezo): sin esta guarda, una curva que nunca supera
+        estado_estacionario+3 dB daba conv = 0, "convergio al instante". El CMA
+        pasa check_head=False: su error de dispersion en QAM no baja de ~-3 dB
+        y el inicio no es comparable;
+      - la curva nunca se estabiliza.
     """
+    err2 = np.nan_to_num(np.asarray(err2, dtype=float), nan=1e30, posinf=1e30)
     lc = 10 * np.log10(_smooth(err2, 32) + 1e-15)
+    # Los ultimos simbolos tienen la ventana de regresores rellena de ceros
+    # (fin de la rafaga): su error crece por el borde, no por el filtro. Se
+    # excluyen del regimen permanente y del instante de convergencia.
+    edge = min(64, err2.size // 10)
+    err2 = err2[:err2.size - edge]
     tail = max(16, err2.size // 10)
     steady = 10 * np.log10(np.mean(err2[-tail:]) + 1e-15)
-    thr = steady + 3.0
-    above = np.where(lc > steady + 3.0)[0]
+    if not adaptive:
+        return lc, float(steady), -1
+    head = 10 * np.log10(np.mean(err2[:min(32, err2.size)]) + 1e-15)
+    if diverged or not np.isfinite(steady) or (check_head and steady > head + 3.0):
+        return lc, float(steady), -1                # diverge: termina peor que empezo
+    # El instante de convergencia se mide sobre una mediana movil, no sobre la
+    # media: un solo error de decision en regimen permanente da un |e|^2 cientos
+    # de veces mayor que el MSE y, con la media, saca la curva de la banda de
+    # 3 dB al final de la trama ("no converge" con el filtro ya convergido).
+    from scipy.ndimage import median_filter
+    lcm = 10 * np.log10(median_filter(err2, size=65, mode="nearest") + 1e-15)
+    steady_m = 10 * np.log10(np.median(err2[-tail:]) + 1e-15)
+    above = np.where(lcm > steady_m + 3.0)[0]
     conv = 0 if above.size == 0 else int(above[-1] + 1)
-    if conv >= lc.size:
+    if conv >= lcm.size:
         conv = -1                                   # nunca converge de forma estable
     return lc, float(steady), int(conv)
 
@@ -238,6 +264,9 @@ def run_rls(r: np.ndarray, train: np.ndarray, mod: Modulation,
                     convergence_symbols=conv, flops_per_symbol=flop_count("rls", n))
 
 
+CMA_MU_SCALE = 0.1      # factor entre el mu del deslizador (NLMS) y el del CMA
+
+
 def run_cma(r: np.ndarray, train: np.ndarray, mod: Modulation,
             cfg: EqualizerConfig) -> EqResult:
     """CMA de Godard (p = 2): ciego, no usa la secuencia de entrenamiento."""
@@ -249,21 +278,33 @@ def run_cma(r: np.ndarray, train: np.ndarray, mod: Modulation,
     R2 = np.mean(np.abs(c) ** 4) / np.mean(np.abs(c) ** 2)
     y = np.empty(r.size, dtype=complex)
     err2 = np.empty(r.size)
+    # El deslizador mu es el del NLMS (rango [0.01, 1]); el CMA es un gradiente
+    # de orden 3 en |y| y diverge con ese rango, asi que usa mu * CMA_MU_SCALE.
+    mu_eff = cfg.mu * CMA_MU_SCALE
+    w0 = w.copy()
+    n_reset = 0
     for k in range(r.size):
         u = u_all[k]
         yk = np.vdot(w, u)
         eps = np.abs(yk) ** 2 - R2
-        # el gradiente de Godard crece con |y|^3; se limita para evitar que un
-        # transitorio inicial haga divergir el filtro (problema clasico del CMA)
         eps = float(np.clip(eps, -10 * R2, 10 * R2))
-        step = cfg.mu / (np.vdot(u, u).real + 1e-9)
+        # paso normalizado por ||u||^2 y por max(|y|^2, R2): el efecto sobre la
+        # salida es dy = -mu_eff * eps * y / max(|y|^2, R2), una contraccion para
+        # mu_eff < 1 aunque |y| sea enorme (el gradiente crudo crece con |y|^3).
+        step = mu_eff / ((np.vdot(u, u).real + 1e-9) * max(abs(yk) ** 2, R2))
         # actualizacion CMA: w <- w - mu (|y|^2 - R2) y* u  (gradiente de Godard)
-        w = w - step * eps * np.conj(yk) * u
-        if not np.all(np.isfinite(w)):              # divergencia: reinicia al tap central
-            w = np.zeros(n, dtype=complex); w[d] = 1.0
+        wn = w - step * eps * np.conj(yk) * u
+        if np.all(np.isfinite(wn)):
+            w = wn
+        else:                                       # divergencia: reinicia al tap central
+            w = w0.copy()
+            n_reset += 1
         y[k] = yk
         err2[k] = eps ** 2
-    lc, steady, conv = _analyze(err2, train.size)
+    tail = err2[-max(16, err2.size // 10):]
+    diverged = (not np.all(np.isfinite(y)) or np.mean(tail) > 4 * R2 ** 2
+                or n_reset > r.size // 10)
+    lc, steady, conv = _analyze(err2, train.size, diverged=diverged, check_head=False)
     return EqResult(y=y, err=err2, w=w, kind="cma", n_taps=n, ref_tap=d,
                     learning_curve=lc, steady_mse_db=steady,
                     convergence_symbols=conv, flops_per_symbol=flop_count("cma", n))
@@ -320,9 +361,9 @@ def run_fixed(r: np.ndarray, w: np.ndarray, train: np.ndarray, kind: str,
     nt = min(train.size, r.size)
     err2[:nt] = np.abs(train[:nt] - y[:nt]) ** 2
     err2[nt:] = np.mean(err2[:nt]) if nt else 0.0
-    lc, steady, conv = _analyze(err2, nt)
+    lc, steady, conv = _analyze(err2, nt, adaptive=False)
     return EqResult(y=y, err=err2, w=w, kind=kind, n_taps=n, ref_tap=ref_tap,
-                    learning_curve=lc, steady_mse_db=steady, convergence_symbols=0,
+                    learning_curve=lc, steady_mse_db=steady, convergence_symbols=-1,
                     flops_per_symbol=flop_count(kind, n))
 
 
@@ -331,10 +372,10 @@ def run_none(r: np.ndarray, train: np.ndarray) -> EqResult:
     nt = min(train.size, r.size)
     err2[:nt] = np.abs(train[:nt] - r[:nt]) ** 2
     err2[nt:] = np.mean(err2[:nt]) if nt else 0.0
-    lc, steady, conv = _analyze(err2, nt)
+    lc, steady, conv = _analyze(err2, nt, adaptive=False)
     return EqResult(y=r.copy(), err=err2, w=np.array([1.0 + 0j]), kind="none",
                     n_taps=1, ref_tap=0, learning_curve=lc, steady_mse_db=steady,
-                    convergence_symbols=0, flops_per_symbol=flop_count("none", 1))
+                    convergence_symbols=-1, flops_per_symbol=flop_count("none", 1))
 
 
 # ---------------------------------------------------------------------------

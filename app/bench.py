@@ -32,6 +32,18 @@ def _sci(x: float) -> str:
     return f"{x:.2e}".replace("e-0", "e-").replace("e+0", "e+")
 
 
+# Por encima de esta BER el enlace no es utilizable aunque la trama enganche.
+BER_ENLACE = 1e-2
+
+
+def link_state(res: SimResult) -> str:
+    """Estado del enlace: el sincronismo de trama solo no basta."""
+    if not res.locked:
+        return "unlock"
+    ber = res.stats.get("ber", 0.0)
+    return "locked" if ber < BER_ENLACE else "weak"
+
+
 class StatusDot(QWidget):
     """Enganche del receptor. Color + texto: nunca solo color."""
 
@@ -52,6 +64,7 @@ class StatusDot(QWidget):
             "idle":    (T.INK_GHOST, "en espera"),
             "busy":    (T.WARNING, "calculando"),
             "locked":  (T.GOOD, "receptor enganchado"),
+            "weak":    (T.WARNING, "enganchado · BER alta"),
             "unlock":  (T.CRITICAL, "sin enganche"),
             "error":   (T.CRITICAL, "error"),
         }[state]
@@ -67,9 +80,9 @@ class ReadoutBar(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("ReadoutBar")
-        h = QHBoxLayout(self)
-        h.setContentsMargins(20, 12, 20, 13)
-        h.setSpacing(0)
+        v = QVBoxLayout(self)
+        v.setContentsMargins(20, 12, 20, 12)
+        v.setSpacing(10)
 
         self.ber = Readout("BER", "", large=True,
                            tip="Tasa de error de bit medida sobre la carga útil.")
@@ -83,28 +96,35 @@ class ReadoutBar(QWidget):
         self.mse = Readout("MSE residual", "dB",
                            tip="Error cuadrático medio residual en régimen permanente.")
         self.conv = Readout("Convergencia", "simb",
-                            tip="Símbolos hasta alcanzar −9 dB de MSE de forma sostenida.")
+                            tip="Primer símbolo a partir del cual la curva de MSE suavizada\n"
+                                "se mantiene a menos de 3 dB del MSE de régimen permanente.\n"
+                                "Solo aplica a ecualizadores adaptativos (LMS, RLS, CMA).")
         self.cost = Readout("Coste", "mult/simb",
                             tip="Multiplicaciones reales por símbolo del ecualizador.\n"
                                 "LMS es O(N); RLS es O(N²).")
         self.eta = Readout("Eficiencia", "b/s/Hz",
                            tip="Rb / B = k / (1 + roll-off).")
 
-        items = (self.ber, self.theory, self.ser, self.evm, self.mse, self.conv,
-                 self.cost, self.eta)
-        for i, r in enumerate(items):
-            if i:
-                sep = QWidget()
-                sep.setFixedWidth(1)
-                sep.setStyleSheet(f"background: {T.RULE_STRONG};")
-                h.addSpacing(14)
-                h.addWidget(sep)
-                h.addSpacing(14)
-            h.addWidget(r)
-        h.addStretch(1)
-
-        self.status = StatusDot()
-        h.addWidget(self.status, 0, Qt.AlignmentFlag.AlignVCenter)
+        rows = ((self.ber, self.theory, self.ser, self.evm, self.eta),
+                (self.mse, self.conv, self.cost))
+        for n, items in enumerate(rows):
+            h = QHBoxLayout()
+            h.setSpacing(0)
+            for i, r in enumerate(items):
+                if i:
+                    sep = QWidget()
+                    sep.setFixedWidth(1)
+                    sep.setStyleSheet(f"background: {T.RULE_STRONG};")
+                    h.addSpacing(16)
+                    h.addWidget(sep)
+                    h.addSpacing(16)
+                r.setMinimumWidth(r.sizeHint().width())
+                h.addWidget(r)
+            h.addStretch(1)
+            if n == 1:
+                self.status = StatusDot()
+                h.addWidget(self.status, 0, Qt.AlignmentFlag.AlignVCenter)
+            v.addLayout(h)
 
     def clear(self) -> None:
         for r in (self.ber, self.theory, self.ser, self.evm, self.mse,
@@ -127,12 +147,17 @@ class ReadoutBar(QWidget):
         self.mse.set("--" if mse_db is None or not math.isfinite(mse_db)
                      else f"{mse_db:.1f}", T.INK)
         c = res.eq_conv
-        self.conv.set("no converge" if c is None or c < 0 else f"{c}",
-                      T.INK if (c is not None and c >= 0) else T.SERIOUS,
-                      unit="" if (c is None or c < 0) else "simb")
+        if res.req.eq_kind in ("none", "zf", "mmse"):
+            self.conv.set("—", T.INK_GHOST, unit="")
+            if res.req.eq_kind == "none":
+                self.mse.set("—", T.INK_GHOST)
+        elif c is None or c < 0:
+            self.conv.set("no converge", T.SERIOUS, unit="")
+        else:
+            self.conv.set(f"{c}", T.INK, unit="simb")
         self.cost.set(f"{res.eq_flops}", T.INK)
         self.eta.set(f"{s.get('eta_bps_hz', float('nan')):.2f}", T.INK)
-        self.status.set_state("locked" if res.locked else "unlock")
+        self.status.set_state(link_state(res))
 
 
 class Bench(QWidget):
@@ -175,9 +200,19 @@ class Bench(QWidget):
         self.const = Constellation()
         self.p_const.set_content(self.const)
 
+        # Dos ojos lado a lado tras el filtro adaptado: antes y después del
+        # ecualizador. En las etapas previas solo se usa el primero.
         self.p_eye = Panel("Diagrama de ojo")
+        eyes = QWidget()
+        eh = QHBoxLayout(eyes)
+        eh.setContentsMargins(0, 0, 0, 0)
+        eh.setSpacing(0)
         self.eye = Eye()
-        self.p_eye.set_content(self.eye)
+        self.eye_after = Eye()
+        eh.addWidget(self.eye, 1)
+        eh.addWidget(self.eye_after, 1)
+        self.eye_after.setVisible(False)
+        self.p_eye.set_content(eyes)
 
         self.p_spec = Panel("Densidad espectral")
         self.spec = Spectrum()
@@ -211,7 +246,7 @@ class Bench(QWidget):
         elif busy:
             self.readout.status.set_state("busy")
         elif self.res is not None:
-            self.readout.status.set_state("locked" if self.res.locked else "unlock")
+            self.readout.status.set_state(link_state(self.res))
 
     def set_error(self, msg: str) -> None:
         self.readout.status.set_state("error", msg[:70])
@@ -249,17 +284,49 @@ class Bench(QWidget):
         else:
             self.p_const.set_note("muestreada en el instante óptimo")
 
-        self.p_eye.set_title(f"Diagrama de ojo  ·  {st.title}")
-        if st.kind == SYMBOL:
-            self.eye.show_wave(None, self.res.sps, tap.opening)
-            self.p_eye.set_note("no medible en este punto", T.INK_GHOST)
-        else:
-            self.eye.show_wave(tap.wave, self.res.sps, tap.opening)
-            op = tap.opening
-            col = T.GOOD if op > 0.5 else (T.WARNING if op > 0.2 else T.CRITICAL)
-            self.p_eye.set_note(f"apertura {op:.3f}", col)
+        self._show_eye(key, st)
 
         bw = (1.0 + self.res.req.beta)
         self.p_spec.set_note(f"B = {bw:.2f} Rs")
         k = self.res.req.eq_kind.upper()
         self.p_conv.set_note("sin ecualizador" if k == "NONE" else f"método {k}")
+
+    def _show_eye(self, key: str, st) -> None:
+        """Un ojo hasta el canal; desde el filtro adaptado, antes y después.
+
+        Las etapas desde la temporización van a 1 muestra/símbolo y no tienen
+        forma de onda propia: se muestra la salida del filtro adaptado (antes)
+        y esa misma señal pasada por los coeficientes del ecualizador (después).
+        """
+        res = self.res
+
+        def col(op: float) -> str:
+            return T.GOOD if op > 0.5 else (T.WARNING if op > 0.2 else T.CRITICAL)
+
+        if key in ("tx", "rrc", "chan"):
+            src = "rrc" if key == "tx" else key
+            tap = res.taps[src]
+            self.eye_after.setVisible(False)
+            self.eye.set_caption("")
+            self.eye.show_wave(tap.wave, res.sps, tap.opening)
+            self.p_eye.set_title(f"Diagrama de ojo  ·  {STAGE_BY_KEY[src].title}")
+            self.p_eye.set_note(f"apertura {tap.opening:.3f}", col(tap.opening))
+            return
+
+        before = res.taps["mf"]
+        self.eye_after.setVisible(True)
+        self.eye.set_caption(f"antes del ecualizador  ·  {before.opening:.3f}",
+                             col(before.opening))
+        self.eye.show_wave(before.wave, res.sps, before.opening)
+        eq = res.req.eq_kind.upper()
+        self.p_eye.set_title("Diagrama de ojo  ·  antes y después del ecualizador")
+        if res.eye_after is None:
+            self.eye_after.set_caption("después del ecualizador")
+            self.eye_after.show_wave(None, res.sps, float("nan"))
+            self.eye_after._unavailable("Sin ecualizador.\nElige uno en el rail.")
+            self.p_eye.set_note(f"apertura {before.opening:.3f}", col(before.opening))
+            return
+        after = res.opening_after
+        self.eye_after.set_caption(f"después del {eq}  ·  {after:.3f}", col(after))
+        self.eye_after.show_wave(res.eye_after, res.sps, after)
+        self.p_eye.set_note(f"apertura {before.opening:.3f} → {after:.3f}", col(after))

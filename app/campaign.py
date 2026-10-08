@@ -314,6 +314,8 @@ class Campaign(QWidget):
 
         self.pick.changed.connect(lambda _k: self._prepare())
         self.depth.moved.connect(lambda _v: self._update_floor())
+        self.controls.settled.connect(
+            lambda: None if self._running else self._update_floor())
         self.run_btn.clicked.connect(self._toggle)
         self._prepare()
 
@@ -370,12 +372,17 @@ class Campaign(QWidget):
 
     def _update_floor(self) -> None:
         req = self.controls.request()
-        k = Modulation(req.mod).bits_per_symbol
+        sw = self._sweep()
+        mods = {ser.mutate(sw.apply(req, sw.xs[0])).mod for ser in sw.series}
+        k = max(Modulation(m).bits_per_symbol for m in mods)
         n = int(self.depth.value())
         self._floor = 1.0 / max(k * n, 1)
+        # En modo log, InfiniteLine.setPos trabaja en coordenadas de vista (log10).
         self.floor_line.setPos(np.log10(self._floor))
+        origen = (f"{k} bits/símbolo, la modulación más densa del barrido"
+                  if len(mods) > 1 else f"{k} bits/símbolo")
         self.floor_note.setText(
-            f"suelo medible {self._floor:.1e}".replace("e-0", "e-"))
+            f"suelo medible {self._floor:.1e} ({origen})".replace("e-0", "e-"))
 
     # -- ejecucion -----------------------------------------------------------
     def _toggle(self) -> None:
@@ -413,7 +420,7 @@ class Campaign(QWidget):
         for ser in sw.series:
             req = ser.mutate(base)
             y = Modulation(req.mod).ber_theory(xs)
-            c = self.pi.plot(xs, np.log10(np.maximum(y, 1e-12)),
+            c = self.pi.plot(xs, np.maximum(y, 1e-12),
                              pen=pg.mkPen(ser.color, width=1.1,
                                           style=Qt.PenStyle.DashLine))
             c.setZValue(-5)
@@ -429,10 +436,11 @@ class Campaign(QWidget):
         y = ber if ber > 0 else (1.0 / bits if bits else self._floor)
         xs, ys = self._data[si]
         xs.append(x)
-        ys.append(np.log10(max(y, 1e-12)))
+        ys.append(max(y, 1e-12))          # BER lineal: pyqtgraph aplica el log10
         self._curves[si].setData(xs, ys)
-        lo = min([min(d[1]) for d in self._data if d[1]] + [-1.0])
-        self.pi.setYRange(max(lo - 0.4, -7.5), 0.1, padding=0)
+        lo = min([np.log10(min(d[1])) for d in self._data if d[1]]
+                 + [np.log10(self._floor), -1.0])
+        self.pi.setYRange(max(lo - 0.4, -7.5), 0.1, padding=0)  # vista: log10
 
     @Slot(int, int)
     def _on_progress(self, done: int, total: int) -> None:

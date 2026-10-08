@@ -109,5 +109,4 @@ La equivalencia con la SNR medida en el ancho de banda ocupado es
 SNR|B = Eb/N0 + 10 log10(k) − 10 log10(1+β)
 ```
 
-(implementada en `comm2.channel.snr_db_from_ebn0`), que es la cifra a usar al
-comparar con GNU Radio, donde el ruido se especifica como tensión.
+(implementada en `comm2.channel.snr_db_from_ebn0`).

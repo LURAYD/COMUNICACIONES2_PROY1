@@ -195,6 +195,10 @@ class SimResult:
     channel_taps: np.ndarray
     sps: int
     fs: float
+    # Ojo DESPUES del ecualizador: sus coeficientes aplicados a la salida
+    # sobremuestreada del filtro adaptado (ver `_equalize_wave`).
+    eye_after: Optional[np.ndarray] = None
+    opening_after: float = float("nan")
 
 
 def _sub(n: int) -> np.ndarray:
@@ -202,6 +206,54 @@ def _sub(n: int) -> np.ndarray:
     if n <= MAX_POINTS:
         return np.arange(n)
     return np.linspace(0, n - 1, MAX_POINTS).astype(int)
+
+
+PHASE_WIN = 128       # simbolos de la media movil del estimador de fase del ojo
+
+
+def _align_phase(seg: np.ndarray, sps: int, mod: Modulation) -> np.ndarray:
+    """Alinea la fase de portadora de la salida del filtro adaptado, solo para el ojo.
+
+    El ojo traza la componente I. En el filtro adaptado la portadora aun no
+    esta corregida en fase (el PLL actua despues, a tasa de simbolo) y el
+    residuo de la estimacion gruesa de frecuencia la hace girar unos grados a lo
+    largo de la trama: I y Q se mezclan y el ojo aparece cerrado aunque el pulso
+    cumpla Nyquist. Se estima la fase a ciegas con la potencia M-esima en el
+    instante optimo, suavizada con una media movil para seguir esa deriva, y se
+    deshace. No altera la senal que usa el receptor.
+    """
+    c = mod.constellation
+    m = 8 if mod.name == "8psk" else 4
+    ref = np.mean(c ** m)
+    if abs(ref) < 1e-6 or seg.size < sps * PHASE_WIN:
+        return seg
+    off = metrics.best_sampling_phase(seg, sps)
+    s = seg[off::sps]
+    z = np.convolve(s ** m, np.ones(PHASE_WIN) / PHASE_WIN, mode="same")
+    ph = np.unwrap(np.angle(z / ref)) / m
+    # Si algun punto cae sobre el eje Q (8PSK), su I es 0 y el ojo en I queda
+    # cerrado por geometria: se gira media separacion angular para evitarlo.
+    if np.min(np.abs(c.real)) < 0.05:
+        ph = ph - np.pi / c.size
+    t_sym = off + sps * np.arange(s.size)
+    phase = np.interp(np.arange(seg.size), t_sym, ph)
+    return seg * np.exp(-1j * phase)
+
+
+def _equalize_wave(x: np.ndarray, w: np.ndarray, ref_tap: int, sps: int) -> np.ndarray:
+    """Aplica el ecualizador espaciado a T a la senal sobremuestreada.
+
+    El ecualizador calcula y[n] = sum_j conj(w_j) r[n + d - j] sobre un simbolo
+    por periodo. Ese mismo FIR, con un coeficiente cada `sps` muestras, filtra
+    la forma de onda continua: en los instantes de muestreo reproduce los
+    simbolos ecualizados y entre ellos da la forma de onda real, que es lo que
+    permite trazar el ojo despues del ecualizador.
+    """
+    g = np.zeros((w.size - 1) * sps + 1, dtype=complex)
+    g[::sps] = np.conj(w)
+    full = np.convolve(x, g)
+    lead = ref_tap * sps
+    return full[lead: lead + x.size]
 
 
 def simulate(req: Request) -> SimResult:
@@ -244,6 +296,7 @@ def simulate(req: Request) -> SimResult:
 
     # --- puntos sobremuestreados -------------------------------------------
     sps = p.sps
+    eye_after, opening_after = None, float("nan")
     wave_src = {
         "rrc": r.tx_signal,
         "chan": r.rx_signal,
@@ -257,6 +310,17 @@ def simulate(req: Request) -> SimResult:
         seg = w[lo:hi]
         if seg.size < sps * 8:
             seg = w
+        if key == "mf":
+            # El ojo de despues se calcula sobre el MISMO tramo, antes de
+            # alinear la fase: el ecualizador aprendio sobre simbolos
+            # normalizados por la ganancia compleja estimada, no sobre `seg`.
+            if req.eq_kind != "none" and np.size(r.eq.w) and np.all(np.isfinite(r.eq.w)):
+                a = complex(r.sync_info.get("gain_est", 1.0)) or 1.0
+                after = _equalize_wave(seg / a, np.asarray(r.eq.w),
+                                       int(r.eq.ref_tap), sps)
+                eye_after = _align_phase(after, sps, mod)
+                opening_after = metrics.eye_opening(eye_after, sps=sps)["opening"]
+            seg = _align_phase(seg, sps, mod)
         op = metrics.eye_opening(seg, sps=sps)["opening"]
         off = metrics.best_sampling_phase(seg, sps)
         dec = seg[off::sps]
@@ -321,7 +385,7 @@ def simulate(req: Request) -> SimResult:
         mu_track=np.asarray(r.sync_info.get("mu_track", [])),
         pll_phase=np.asarray(r.sync_info.get("pll_phase", [])),
         channel_taps=np.asarray(r.sync_info.get("channel_taps", [])),
-        sps=sps, fs=p.fs,
+        sps=sps, fs=p.fs, eye_after=eye_after, opening_after=float(opening_after),
     )
 
 
