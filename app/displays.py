@@ -96,6 +96,11 @@ class Constellation(Display):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.pi.setAspectLocked(True)
+        # Ejes de tamano fijo: con el aspecto bloqueado, el ancho de los rotulos
+        # cambia el area util, esta cambia el rango y el rango cambia los
+        # rotulos; en la rejilla de 3 constelaciones eso no convergia nunca.
+        self.pi.getAxis("left").setWidth(34)
+        self.pi.getAxis("bottom").setHeight(30)
         self.pi.setXRange(-1.75, 1.75, padding=0)
         self.pi.setYRange(-1.75, 1.75, padding=0)
         _label(self.pi, "Q", "I")
@@ -186,16 +191,17 @@ class Constellation(Display):
 # Diagrama de ojo
 # ---------------------------------------------------------------------------
 
+EYE_UPSAMPLE = 4
+
+
 class Eye(Display):
     def __init__(self, parent=None):
         super().__init__(parent)
         _label(self.pi, "amplitud (I)", "tiempo [T]")
         self.pi.setXRange(-1, 1, padding=0)
 
-        # connect="finite": las 300 trazas van en un solo camino separado por
-        # NaN, y sin esto pyqtgraph 0.14 NO corta en los NaN: une el final de
-        # cada traza (t = +T) con el principio de la siguiente (t = -T) y
-        # cruza el panel con rectas diagonales que no son senal.
+        # connect="finite": los NaN separan trazas; con "all" (por defecto) se
+        # dibujaba una linea de retorno de cada traza a la siguiente.
         self.bloom = pg.PlotCurveItem(pen=pg.mkPen(T.rgba(T.EYE, T.EYE_BLOOM), width=4.5),
                                       connect="finite")
         self.trace = pg.PlotCurveItem(pen=pg.mkPen(T.rgba(T.EYE, T.EYE_TRACE), width=1.0),
@@ -214,6 +220,13 @@ class Eye(Display):
         self.pi.addItem(self.msg)
         self.msg.setVisible(False)
 
+    def set_caption(self, text: str, color: Optional[str] = None) -> None:
+        """Rotulo sobre el lienzo; vacio lo retira (ojo unico)."""
+        if text:
+            self.pi.setTitle(text, color=color or T.INK_DIM, size="9pt")
+        else:
+            self.pi.setTitle(None)
+
     def show_wave(self, wave: Optional[np.ndarray], sps: int, opening: float) -> None:
         if wave is None:
             self._unavailable("Este punto ya está a tasa de símbolo.\n"
@@ -226,20 +239,17 @@ class Eye(Display):
         wave = np.asarray(wave)
         rms = float(np.sqrt(np.mean(np.abs(wave) ** 2))) + 1e-15
         wave = wave / rms
+        # Interpolacion x4 solo para dibujar: con 8 muestras por simbolo cada
+        # traza es una quebrada de 16 segmentos y el ojo se ve dentado.
+        from scipy.signal import resample_poly
+        wave = resample_poly(wave, EYE_UPSAMPLE, 1)
+        sps = sps * EYE_UPSAMPLE
 
         off = metrics.best_sampling_phase(wave, sps)
-        # Trazas de -T a +T centradas en cada instante de muestreo optimo, una
-        # por simbolo (se solapan un periodo, como en un osciloscopio con
-        # disparo de reloj). Antes se centraba en `off + sps/2`: el instante de
-        # decision caia en t = +-T/2 y en el centro quedaba el CRUCE, no la
-        # apertura.
-        x = np.real(wave)
-        L = 2 * sps + 1
-        centers = off + sps * np.arange(1, 1 + max(0, (x.size - off - sps - 1) // sps))
-        centers = centers[:300]
-        t = (np.arange(L) - sps) / sps
-        seg = (x[centers[:, None] - sps + np.arange(L)[None, :]]
-               if centers.size else np.zeros((0, L)))
+        # t=0 (la marca) cae en el instante de muestreo optimo: eye_data pone
+        # t=0 en el indice sps de cada traza, congruente con `off` modulo sps.
+        t, seg = metrics.eye_data(np.real(wave), sps, n_traces=300, span=2,
+                                  offset=int(off) % sps)
         if seg.shape[0] == 0:
             self._unavailable("Tramo demasiado corto para trazar el ojo.")
             return

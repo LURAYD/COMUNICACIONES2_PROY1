@@ -30,7 +30,6 @@ bibliotecas de comunicaciones de terceros:
   ML, PLL de fase dirigido por decisión.
 - Ecualización: LMS normalizado, RLS, ZF, MMSE, CMA. Métricas de BER, MSE
   residual, velocidad de convergencia y coste en multiplicaciones por símbolo.
-- Validación cruzada contra GNU Radio 3.10 por ficheros complex64.
 - Campaña reproducible con semilla derivada; pruebas de propiedades teóricas.
 
 ================================================================
@@ -57,8 +56,7 @@ DESCARTADO 4. Análisis de sensibilidad basado en varianza aplicado a
 tolerancias de componentes de un receptor. Existe (estrategia Morris-LHS-Sobol
 en receptores UWB).
 
-DESCARTADO 5. Herramientas de enseñanza de comunicaciones digitales con SDR y
-GNU Radio. Literatura amplia en ASEE, FIE e IEEE Trans. on Education. NO me
+DESCARTADO 5. Herramientas de enseñanza de comunicaciones digitales con SDR. Literatura amplia en ASEE, FIE e IEEE Trans. on Education. NO me
 propongas la vía educativa: ya sé que existe y no es lo que busco aquí.
 
 ================================================================

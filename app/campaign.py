@@ -316,6 +316,8 @@ class Campaign(QWidget):
 
         self.pick.changed.connect(lambda _k: self._prepare())
         self.depth.moved.connect(lambda _v: self._update_floor())
+        self.controls.settled.connect(
+            lambda: None if self._running else self._update_floor())
         self.run_btn.clicked.connect(self._toggle)
         self._prepare()
 
@@ -373,12 +375,17 @@ class Campaign(QWidget):
 
     def _update_floor(self) -> None:
         req = self.controls.request()
-        k = Modulation(req.mod).bits_per_symbol
+        sw = self._sweep()
+        mods = {ser.mutate(sw.apply(req, sw.xs[0])).mod for ser in sw.series}
+        k = max(Modulation(m).bits_per_symbol for m in mods)
         n = int(self.depth.value())
         self._floor = 1.0 / max(k * n, 1)
+        # En modo log, InfiniteLine.setPos trabaja en coordenadas de vista (log10).
         self.floor_line.setPos(np.log10(self._floor))
+        origen = (f"{k} bits/símbolo, la modulación más densa del barrido"
+                  if len(mods) > 1 else f"{k} bits/símbolo")
         self.floor_note.setText(
-            f"suelo medible {self._floor:.1e}".replace("e-0", "e-"))
+            f"suelo medible {self._floor:.1e} ({origen})".replace("e-0", "e-"))
 
     # -- ejecucion -----------------------------------------------------------
     def _toggle(self) -> None:
@@ -446,7 +453,8 @@ class Campaign(QWidget):
             symbolPen=[pg.mkPen(col, width=1.6) if c else pg.mkPen(T.PANEL, width=1.4)
                        for c in cs])
         # el rango de la vista, en cambio, va en decadas (coordenadas log10)
-        lo = min([np.log10(min(d[1])) for d in self._data if d[1]] + [-1.0])
+        lo = min([np.log10(min(d[1])) for d in self._data if d[1]]
+                 + [np.log10(self._floor), -1.0])
         self.pi.setYRange(max(lo - 0.4, -7.5), 0.1, padding=0)
 
     @Slot(int, int)

@@ -30,7 +30,6 @@ from comm2 import (EqualizerConfig, ReceiverConfig, SystemParams, metrics,
 from comm2.channel import PROFILES
 from comm2.link import run_link
 from comm2.modulation import Modulation
-from comm2.pulse import pulse_shape, rc_filter
 
 
 # ---------------------------------------------------------------------------
@@ -159,7 +158,6 @@ def build(req: Request):
 
 MAX_POINTS = 3000     # simbolos dibujados; mas no anade informacion visible
 EYE_TRACES = 320      # trazas del ojo: suficientes para que el fosforo acumule
-EYE_SYMBOLS = 800     # símbolos con que se reconstruye el ojo a tasa de símbolo
 
 
 @dataclass
@@ -197,6 +195,10 @@ class SimResult:
     channel_taps: np.ndarray
     sps: int
     fs: float
+    # Ojo DESPUES del ecualizador: sus coeficientes aplicados a la salida
+    # sobremuestreada del filtro adaptado (ver `_equalize_wave`).
+    eye_after: Optional[np.ndarray] = None
+    opening_after: float = float("nan")
 
 
 def _sub(n: int) -> np.ndarray:
@@ -204,6 +206,54 @@ def _sub(n: int) -> np.ndarray:
     if n <= MAX_POINTS:
         return np.arange(n)
     return np.linspace(0, n - 1, MAX_POINTS).astype(int)
+
+
+PHASE_WIN = 128       # simbolos de la media movil del estimador de fase del ojo
+
+
+def _align_phase(seg: np.ndarray, sps: int, mod: Modulation) -> np.ndarray:
+    """Alinea la fase de portadora de la salida del filtro adaptado, solo para el ojo.
+
+    El ojo traza la componente I. En el filtro adaptado la portadora aun no
+    esta corregida en fase (el PLL actua despues, a tasa de simbolo) y el
+    residuo de la estimacion gruesa de frecuencia la hace girar unos grados a lo
+    largo de la trama: I y Q se mezclan y el ojo aparece cerrado aunque el pulso
+    cumpla Nyquist. Se estima la fase a ciegas con la potencia M-esima en el
+    instante optimo, suavizada con una media movil para seguir esa deriva, y se
+    deshace. No altera la senal que usa el receptor.
+    """
+    c = mod.constellation
+    m = 8 if mod.name == "8psk" else 4
+    ref = np.mean(c ** m)
+    if abs(ref) < 1e-6 or seg.size < sps * PHASE_WIN:
+        return seg
+    off = metrics.best_sampling_phase(seg, sps)
+    s = seg[off::sps]
+    z = np.convolve(s ** m, np.ones(PHASE_WIN) / PHASE_WIN, mode="same")
+    ph = np.unwrap(np.angle(z / ref)) / m
+    # Si algun punto cae sobre el eje Q (8PSK), su I es 0 y el ojo en I queda
+    # cerrado por geometria: se gira media separacion angular para evitarlo.
+    if np.min(np.abs(c.real)) < 0.05:
+        ph = ph - np.pi / c.size
+    t_sym = off + sps * np.arange(s.size)
+    phase = np.interp(np.arange(seg.size), t_sym, ph)
+    return seg * np.exp(-1j * phase)
+
+
+def _equalize_wave(x: np.ndarray, w: np.ndarray, ref_tap: int, sps: int) -> np.ndarray:
+    """Aplica el ecualizador espaciado a T a la senal sobremuestreada.
+
+    El ecualizador calcula y[n] = sum_j conj(w_j) r[n + d - j] sobre un simbolo
+    por periodo. Ese mismo FIR, con un coeficiente cada `sps` muestras, filtra
+    la forma de onda continua: en los instantes de muestreo reproduce los
+    simbolos ecualizados y entre ellos da la forma de onda real, que es lo que
+    permite trazar el ojo despues del ecualizador.
+    """
+    g = np.zeros((w.size - 1) * sps + 1, dtype=complex)
+    g[::sps] = np.conj(w)
+    full = np.convolve(x, g)
+    lead = ref_tap * sps
+    return full[lead: lead + x.size]
 
 
 def simulate(req: Request) -> SimResult:
@@ -238,30 +288,15 @@ def simulate(req: Request) -> SimResult:
     idx = _sub(n_pl)
     ref_pts = ideal[idx]
 
-    # --- ojo en las etapas a tasa de símbolo --------------------------------
-    # El ojo mide ISI y ruido sobre la componente I. Un giro lento de portadora
-    # (el residuo de frecuencia que el PLL todavía no ha quitado) mezcla I con Q
-    # y lo cierra aunque no haya ISI, así que se quita antes de medir y de
-    # dibujar; el giro se sigue viendo en la constelación, que usa `arr` tal
-    # cual. El trazo entre instantes de decisión se reconstruye con el coseno
-    # alzado (interpolación de Nyquist): en t = 0 los valores son exactamente
-    # los símbolos medidos.
-    rc = rc_filter(p.beta, p.span, p.sps)
-    d_rc = (rc.size - 1) // 2
-    n_eye = min(n_pl, EYE_SYMBOLS)
-
     taps: dict[str, Tap] = {}
     for key, arr in sym_taps.items():
         evm = metrics.evm_percent(arr, ideal) if key != "tx" else 0.0
-        arr_d = arr if key == "tx" else arr * np.exp(
-            -1j * metrics.slow_phase(arr, mod.constellation))
-        op = metrics.eye_opening(arr_d, sps=1)["opening"]
-        recon = pulse_shape(arr_d[:n_eye], rc, p.sps)[d_rc: d_rc + n_eye * p.sps]
-        taps[key] = Tap(key=key, kind=SYMBOL, pts=arr[idx], wave=recon,
-                        evm=evm, opening=op)
+        op = metrics.eye_opening(arr, sps=1)["opening"]
+        taps[key] = Tap(key=key, kind=SYMBOL, pts=arr[idx], evm=evm, opening=op)
 
     # --- puntos sobremuestreados -------------------------------------------
     sps = p.sps
+    eye_after, opening_after = None, float("nan")
     wave_src = {
         "rrc": r.tx_signal,
         "chan": r.rx_signal,
@@ -275,21 +310,26 @@ def simulate(req: Request) -> SimResult:
         seg = w[lo:hi]
         if seg.size < sps * 8:
             seg = w
+        if key == "mf":
+            # El ojo de despues se calcula sobre el MISMO tramo, antes de
+            # alinear la fase: el ecualizador aprendio sobre simbolos
+            # normalizados por la ganancia compleja estimada, no sobre `seg`.
+            if req.eq_kind != "none" and np.size(r.eq.w) and np.all(np.isfinite(r.eq.w)):
+                a = complex(r.sync_info.get("gain_est", 1.0)) or 1.0
+                after = _equalize_wave(seg / a, np.asarray(r.eq.w),
+                                       int(r.eq.ref_tap), sps)
+                eye_after = _align_phase(after, sps, mod)
+                opening_after = metrics.eye_opening(eye_after, sps=sps)["opening"]
+            seg = _align_phase(seg, sps, mod)
+        op = metrics.eye_opening(seg, sps=sps)["opening"]
         off = metrics.best_sampling_phase(seg, sps)
         dec = seg[off::sps]
-        # Tras el filtro adaptado la historia dice «corregida en frecuencia»:
-        # para el ojo se quita también el residuo lento (ver etapas a tasa de
-        # símbolo). En el canal no: ahí el offset de frecuencia es parte de lo
-        # que hay que ver.
-        eye_w = seg * np.exp(-1j * metrics.slow_phase(
-            seg, mod.constellation, sps, off)) if key == "mf" else seg
-        op = metrics.eye_opening(eye_w, sps=sps)["opening"]
         # Normalizacion a energia unitaria: sin esto la constelacion del punto de
         # canal se sale de escala y no se puede comparar con la del transmisor.
         rms = np.sqrt(np.mean(np.abs(dec) ** 2)) + 1e-12
         dec = dec / rms
         k = _sub(dec.size)
-        taps[key] = Tap(key=key, kind=WAVE, pts=dec[k], wave=eye_w,
+        taps[key] = Tap(key=key, kind=WAVE, pts=dec[k], wave=seg,
                         evm=float("nan"), opening=op)
 
     # --- densidad espectral -------------------------------------------------
@@ -345,7 +385,7 @@ def simulate(req: Request) -> SimResult:
         mu_track=np.asarray(r.sync_info.get("mu_track", [])),
         pll_phase=np.asarray(r.sync_info.get("pll_phase", [])),
         channel_taps=np.asarray(r.sync_info.get("channel_taps", [])),
-        sps=sps, fs=p.fs,
+        sps=sps, fs=p.fs, eye_after=eye_after, opening_after=float(opening_after),
     )
 
 

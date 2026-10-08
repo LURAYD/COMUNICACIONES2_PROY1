@@ -5,8 +5,7 @@
 Simulación completa de un enlace digital en banda base compleja: transmisor con
 conformación RRC, canal con multitrayectoria, AWGN y errores de sincronización, y
 receptor adaptativo con recuperación de temporización, de portadora y ecualización
-LMS / RLS. Implementado en Python puro sobre NumPy/SciPy, con validación cruzada
-en GNU Radio Companion.
+LMS / RLS. Implementado en Python puro sobre NumPy/SciPy.
 
 ![Diagrama de bloques](results/figures/diagrama_bloques.png)
 
@@ -14,21 +13,15 @@ en GNU Radio Companion.
 
 ## Instalación
 
-Requiere **Python 3.11** (ver nota sobre GNU Radio más abajo).
+Requiere **Python 3.11**.
 
 ```bash
 python -m venv .venv
 .venv\Scripts\activate          # Windows
-pip install -e .
+pip install -e ".[gui]"
 ```
 
-Dependencias: `numpy`, `scipy`, `matplotlib`, `pandas`.
-
-> **Sobre GNU Radio.** Sus *bindings* de Python están compilados contra el
-> intérprete del sistema, no contra un entorno virtual: no intentes
-> `import gnuradio` dentro de `.venv`. Mantén dos entornos separados y comunica
-> ambos mediante ficheros `complex64`, que es exactamente el formato interno de
-> GNU Radio. Ver [`grc/README.md`](grc/README.md).
+Dependencias: `numpy`, `scipy`, `matplotlib`, `pandas` (y `PySide6` + `pyqtgraph` para la interfaz).
 
 ## Banco de pruebas
 
@@ -38,12 +31,10 @@ Aplicación de escritorio para conducir el enlace en vivo. Doble clic en
 **`Banco de pruebas.bat`**, o desde la línea de órdenes:
 
 ```bash
-pip install -e .[gui]
 python -m app
 ```
 
-Sin navegador, sin servidor y sin puerto: es una ventana Qt, la misma biblioteca
-con la que GNU Radio dibuja sus sumideros de constelación y espectro.
+Sin navegador, sin servidor y sin puerto: es una ventana Qt.
 
 La idea que la organiza: **la cadena TX → canal → RX es la barra de
 navegación**. Se elige un punto de derivación y los instrumentos muestran la
@@ -67,7 +58,6 @@ Tres vistas:
 |---|---|
 | **Banco de pruebas** | Constelación, ojo, espectro y convergencia en los ocho puntos de derivación, con la lectura de BER, SER, EVM, MSE, convergencia y coste. |
 | **Campaña** | Los experimentos 1–5 de la guía como barridos que se dibujan mientras se calculan. Los puntos sin errores se dibujan sobre la línea de suelo `1/(k·N)`, marcados como cota y no como valor. |
-| **GNU Radio** | Compila el flowgraph con `grcc`, lo ejecuta con el intérprete de radioconda, lee el `.cf32` y superpone su espectro sobre el del simulador. |
 
 ### Sin interfaz
 
@@ -148,12 +138,10 @@ app/                banco de pruebas de escritorio (PySide6 + pyqtgraph)
   signalpath.py     la cadena como barra de navegación + perfil del ojo
   displays.py       constelación, ojo, espectro y convergencia
   controls.py       rail de parámetros con su lógica de activación
-  bench.py          vista en vivo; campaign.py  barridos; grcview.py  GNU Radio
-  grc_driver.py     guion ejecutado por el intérprete de radioconda
+  bench.py          vista en vivo; campaign.py  barridos
 
 experiments/        campaña de simulación (un script por experimento)
 tests/              pruebas de la biblioteca y de reproducibilidad de la campaña
-grc/                flowgraphs de GNU Radio + instrucciones de validación cruzada
 docs/               arquitectura, justificación de parámetros, bibliografía
 results/            data/*.csv y figures/*.png generados
 ```
@@ -178,7 +166,6 @@ results/            data/*.csv y figures/*.png generados
 | 8. Dos estrategias de ecualización | Método A = LMS, método B = RLS |
 | 9. Experimentos 1–5 | `experiments/exp1..exp5` |
 | 10. Métricas | `metrics` |
-| 11. Validación cruzada GNU Radio | `grc/` + `experiments/exp6_validacion_grc.py` |
 | 12. Diagrama de bloques (semana 1) | `experiments/exp0_diagrama_bloques.py` |
 
 ---
@@ -271,7 +258,6 @@ exige.
   justificación física y, cuando procede, la medición que lo fijó.
 - [`docs/referencias.md`](docs/referencias.md) — bibliografía indicando dónde
   interviene cada referencia.
-- [`grc/README.md`](grc/README.md) — procedimiento de validación cruzada.
 
 ## Pruebas
 

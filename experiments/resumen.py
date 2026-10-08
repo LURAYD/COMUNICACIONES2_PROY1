@@ -138,11 +138,6 @@ def resumen() -> list[tuple[str, pd.DataFrame]]:
         secciones.append(("Experimento 5 — potencia frente a eficiencia espectral "
                           "(BER = 1e-3)", t))
 
-    # ------------------------------------------------ Exp 6: GNU Radio
-    d = _leer("exp6_validacion_cruzada")
-    if d is not None:
-        secciones.append(("Validacion cruzada con GNU Radio", d))
-
     return secciones
 
 

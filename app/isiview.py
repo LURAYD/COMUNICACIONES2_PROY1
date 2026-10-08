@@ -25,7 +25,8 @@ from typing import Optional
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (QGridLayout, QHBoxLayout, QSizePolicy, QVBoxLayout,
+                               QWidget)
 
 from . import theme as T
 from .bench import StatusDot, fmt_ber
@@ -197,8 +198,11 @@ class Breakdown(QWidget):
 
     def show(self, res: IsiResult) -> None:
         eq = res.req.eq_kind
-        rows = [(c, eq if r == "eq" else "none") for c, r in self.ROWS
-                if (c, eq if r == "eq" else "none") in res.links]
+        rows = []
+        for c, r in self.ROWS:
+            k = (c, eq if r == "eq" else "none")
+            if k in res.links and k not in rows:   # eq "none": ("ideal","eq") repetiria
+                rows.append(k)
         # sin ecualizador en el rail solo hay dos filas: no se inventan las otras
         ys, isi, noise, tot, ticks = [], [], [], [], []
         name = res.eq_name or "sin ecualizar"
@@ -255,6 +259,15 @@ class IsiView(QWidget):
         left.addWidget(self.h_meta)
         ch.addLayout(left, 0)
         story = text_label(STORY, T.f_body(), T.INK_DIM, wrap=True)
+        # Altura fija e independiente del ancho: un QLabel con wordWrap trae
+        # altura-para-ancho y, junto al aspecto bloqueado de las constelaciones,
+        # el maquetado oscilaba para siempre (cuelgue a ciertos tamanos).
+        pol = story.sizePolicy()
+        pol.setHeightForWidth(False)
+        pol.setVerticalPolicy(QSizePolicy.Policy.Fixed)
+        story.setSizePolicy(pol)
+        story.setFixedHeight(story.fontMetrics().lineSpacing() * 4 + 4)
+        story.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         ch.addWidget(story, 1)
         cv.addWidget(cap)
 

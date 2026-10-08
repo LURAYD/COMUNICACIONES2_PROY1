@@ -14,6 +14,7 @@ Genera, para la configuración pedida:
     cadena.png                 el camino de la señal con su perfil de apertura
     constelacion_<etapa>.png   los ocho puntos de derivación
     ojo_<etapa>.png            los tres puntos donde el ojo es medible
+    ojo_ecualizado.png         el ojo tras el ecualizador (si lo hay)
     espectro.png               PSD del transmisor y tras el canal
     convergencia.png           curvas de aprendizaje LMS y RLS
     medidas.csv                BER, SER, EVM, MSE, convergencia y coste
@@ -108,22 +109,26 @@ def run(req: Request, out_dir: Path, verbose: bool = True) -> SimResult:
         _grab(p, PANEL_SIZE, out_dir / f"constelacion_{st.key}.png")
     say(f"  constelacion_*.png  ({sum(1 for s in STAGES)} etapas)")
 
-    # --- ojo en las ocho etapas ---------------------------------------------
-    # En las de tasa de símbolo se reconstruye desde los símbolos (ver
-    # engine.simulate) y la nota lo dice.
+    # --- ojo, solo donde es medible -----------------------------------------
     n_eye = 0
     for st in STAGES:
+        if st.kind == SYMBOL:
+            continue                          # ya está a tasa de símbolo
         tap = res.taps[st.key]
-        if tap.wave is None:
-            continue
         e = Eye()
         e.show_wave(tap.wave, res.sps, tap.opening)
         p = _panel(f"Diagrama de ojo  ·  {st.title}", e)
-        rec = "  ·  desde los símbolos" if st.kind == SYMBOL else ""
-        p.set_note(f"apertura {tap.opening:.3f}{rec}")
+        p.set_note(f"apertura {tap.opening:.3f}")
         _grab(p, PANEL_SIZE, out_dir / f"ojo_{st.key}.png")
         n_eye += 1
-    say(f"  ojo_*.png  ({n_eye} etapas)")
+    if res.eye_after is not None:
+        e = Eye()
+        e.show_wave(res.eye_after, res.sps, res.opening_after)
+        p = _panel(f"Diagrama de ojo  ·  después del {req.eq_kind.upper()}", e)
+        p.set_note(f"apertura {res.taps['mf'].opening:.3f} → {res.opening_after:.3f}")
+        _grab(p, PANEL_SIZE, out_dir / "ojo_ecualizado.png")
+        n_eye += 1
+    say(f"  ojo_*.png  ({n_eye} puntos medibles)")
 
     # --- espectro y convergencia --------------------------------------------
     sp = Spectrum()
@@ -166,6 +171,7 @@ def run(req: Request, out_dir: Path, verbose: bool = True) -> SimResult:
         ]
         filas += [(f"apertura_ojo_{st.key}", f"{res.taps[st.key].opening:.4f}", "")
                   for st in STAGES]
+        filas.append(("apertura_ojo_ecualizado", f"{res.opening_after:.4f}", ""))
         wr.writerows(filas)
     say("  medidas.csv")
     say(f"\nEscrito en {out_dir.resolve()}")

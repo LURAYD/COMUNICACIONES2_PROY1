@@ -129,16 +129,4 @@ Engineers*, Analog Devices, 2018, cap. 6 (PDF gratuito)
 <https://www.analog.com/media/en/training-seminars/design-handbooks/Software-Defined-Radio-for-Engineers-2018/SDR4Engineers_CH06.pdf>
 
 Detectores de cruce por cero, Müller/Muller y Gardner con el diseño del lazo de
-temporización paso a paso. Está orientado a implementación con GNU Radio, así que
-es el puente natural entre las referencias [6]–[7] y el flowgraph de GRC de la
-sección 11.
-
----
-
-## Documentación de herramientas
-
-- **GNU Radio 3.10** — wiki y guía de porting de módulos OOT:
-  <https://wiki.gnuradio.org/index.php?title=GNU_Radio_3.10_OOT_Module_Porting_Guide>
-- **Bloques usados en los flowgraphs**: `digital.constellation_modulator`,
-  `channels.channel_model`, `digital.pfb_clock_sync_ccf`,
-  `digital.costas_loop_cc`, `digital.lms_dd_equalizer_cc`.
+temporización paso a paso.

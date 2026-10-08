@@ -59,14 +59,22 @@ def min_bits_for_ber(target_ber: float, n_errors: int = 100) -> int:
 
 
 def symbol_mse(rx: np.ndarray, ref: np.ndarray) -> float:
-    """Error cuadratico medio de simbolo (tras alineacion de fase/ganancia)."""
+    """Error cuadratico medio de simbolo (tras alineacion de fase/ganancia).
+
+    Normalizado por |a|^2 P_ref y saturado en 1 (EVM = 100 %): si la
+    constelacion gira (CFO sin corregir) la ganancia optima `a` tiende a 0 y el
+    cociente explotaba (EVM de miles de %). Un EVM >= 100 % solo significa que
+    el receptor no engancho, asi que se acota ahi.
+    """
     n = min(rx.size, ref.size)
     rx, ref = rx[:n], ref[:n]
+    if n == 0 or not (np.all(np.isfinite(rx)) and np.all(np.isfinite(ref))):
+        return 1.0
     a = np.vdot(ref, rx) / (np.vdot(ref, ref) + 1e-12)   # ganancia compleja optima
     den = np.mean(np.abs(a * ref) ** 2)
     if den < 1e-15:                      # el receptor no engancho: MSE saturado
         return 1.0
-    return float(np.mean(np.abs(rx - a * ref) ** 2) / den)
+    return float(min(np.mean(np.abs(rx - a * ref) ** 2) / den, 1.0))
 
 
 def evm_percent(rx: np.ndarray, ref: np.ndarray) -> float:
@@ -144,35 +152,6 @@ def best_sampling_phase(x: np.ndarray, sps: int) -> int:
     """
     p = [np.mean(np.abs(x[o::sps]) ** 2) for o in range(sps)]
     return int(np.argmax(p))
-
-
-def slow_phase(x: np.ndarray, constellation: np.ndarray, sps: int = 1,
-               offset: int = 0, block: int = 32) -> np.ndarray:
-    """Giro lento de portadora de una senal, estimado a ciegas, muestra a muestra.
-
-    Estimador de potencia P-esima por bloques de `block` simbolos (P = 4 para
-    QPSK/QAM, 8 para 8PSK), desenrollado entre bloques e interpolado. Sirve
-    para DIBUJAR el ojo: el ojo mide ISI y ruido sobre la componente I, y un
-    giro residual de unos pocos Hz mezcla I con Q y lo cierra aunque no haya
-    ISI (medido: 11 Hz de residuo del estimador grueso giran 16 grados en los
-    600 simbolos del ojo y cierran el de AWGN a 12 dB). El receptor no lo usa.
-
-    x : senal a tasa de simbolo (sps=1) o sobremuestreada, muestreada en
-        `offset` para la estimacion. Devuelve la fase para cada muestra de x.
-    """
-    x = np.asarray(x)
-    c = np.asarray(constellation)
-    P = 8 if (np.allclose(np.abs(c), np.abs(c[0])) and c.size == 8) else 4
-    ref = np.angle(np.mean(c ** P))              # fase de referencia de c^P
-    s = x[offset::sps] if sps > 1 else x
-    nb = max(1, s.size // block)
-    centers, ph = [], []
-    for b in range(nb):
-        seg = s[b * block:(b + 1) * block]
-        ph.append(np.angle(np.sum(seg ** P) * np.exp(-1j * ref)))
-        centers.append((b * block + seg.size / 2.0) * sps + offset)
-    ph = np.unwrap(np.array(ph)) / P
-    return np.interp(np.arange(x.size), np.array(centers), ph)
 
 
 def eye_opening(x: np.ndarray, sps: int = 1, offset: int | None = None) -> dict:

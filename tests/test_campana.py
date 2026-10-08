@@ -50,36 +50,22 @@ def _preparar(tmp: Path):
     _common.BASE = _common.BASE.replace(n_payload=N_PAYLOAD, n_train=N_TRAIN)
 
     import exp0_diagrama_bloques, exp1_ber_awgn, exp2_isi, exp3_ecualizacion
-    import exp4_robustez, exp5_modulacion, exp6_validacion_grc
+    import exp4_robustez, exp5_modulacion
 
     modulos = (exp1_ber_awgn, exp2_isi, exp3_ecualizacion, exp4_robustez,
-               exp5_modulacion, exp6_validacion_grc)
+               exp5_modulacion)
     for m in modulos:
         m.BASE = _common.BASE
         ebn0 = getattr(m, "EBN0", None)
         if isinstance(ebn0, np.ndarray):
             m.EBN0 = ebn0[:N_PUNTOS_BARRIDO]
 
-    # exp6 escribe los ficheros de intercambio con GNU Radio en grc/io/. Si no
-    # se redirigen, la prueba los sustituye por la version de carga util minima
-    # y el flowgraph se queda sin la senal de referencia buena.
-    io = tmp / "grc_io"
-    io.mkdir(parents=True, exist_ok=True)
-    exp6_validacion_grc.IO = io
-    exp6_validacion_grc.PY_TX = io / "py_tx_signal.cf32"
-    exp6_validacion_grc.PY_REF = io / "py_reference.npz"
-    exp6_validacion_grc.GRC_TX = io / "grc_tx_signal.cf32"
-    exp6_validacion_grc.GRC_RX = io / "grc_rx_signal.cf32"
-    exp6_validacion_grc.GRC_SYM = io / "grc_rx_symbols.cf32"
-    exp6_validacion_grc.GRC_BYTES = io / "grc_tx_bytes.bin"
-
     return [("0 diagrama de bloques", exp0_diagrama_bloques.main),
             ("1 BER en AWGN", exp1_ber_awgn.main),
             ("2 efecto de la ISI", exp2_isi.main),
             ("3 ecualizacion", exp3_ecualizacion.main),
             ("4 robustez", exp4_robustez.main),
-            ("5 modulaciones", exp5_modulacion.main),
-            ("6 validacion GNU Radio", exp6_validacion_grc.main)]
+            ("5 modulaciones", exp5_modulacion.main)]
 
 
 def test_campana_completa_se_ejecuta_sin_errores():

@@ -307,6 +307,40 @@ Declarado explícitamente para que no se suponga implementado:
 
 ## 9. Estado del árbol de trabajo
 
+**Integración del fork de dake14 (2026-10-08, commit `948e725`).** Manda sobre
+todo lo que este fichero diga en contra:
+
+- **GNU Radio ya NO EXISTE en el proyecto.** Se borraron `app/grcview.py`,
+  `app/grc_driver.py`, `grc/` y `experiments/exp6_validacion_grc.py`; la
+  aplicación tiene tres vistas (banco, ISI y ecualizador, campaña). Decisión
+  del equipo. Quedan como historia, no como estado: la §2 (dos intérpretes),
+  las filas de GNU Radio y de validación cruzada de la §5, las trampas 11e y
+  11f, las órdenes de `exp6` en la §7 y el último punto de la §8. El requisito
+  11 de la guía (validación cruzada) queda **sin cubrir**. Para recuperarlo:
+  `git checkout be6cb2c -- grc app/grcview.py app/grc_driver.py
+  experiments/exp6_validacion_grc.py`.
+- **Diagrama de ojo: se adoptó el diseño de dake14** y se descartó el de la
+  trampa 11g. Hasta el canal hay un ojo; desde el filtro adaptado, dos lado a
+  lado: antes y después del ecualizador (`Bench._show_eye`). El de después son
+  los coeficientes del ecualizador aplicados a la salida sobremuestreada del
+  filtro adaptado (`engine._equalize_wave`), no una reconstrucción desde los
+  símbolos. El giro lento de portadora lo quita `engine._align_phase`;
+  `metrics.slow_phase` se eliminó. Las trazas se interpolan ×4 solo para
+  dibujar. Se conserva el color `T.EYE`.
+- VERIFICADO tras la mezcla (esc. C, 12 dB, LMS): EVM `preeq` → `posteq`
+  77,1 % → 31,1 % (invariante 4.1 intacto); apertura tras el filtro adaptado
+  0,118 y tras el ecualizador **0,365**; aperturas a tasa de símbolo 1,000 /
+  0,105 / 0,087 / 0,467 / 0,483 (sin quitar el giro, como antes del 27-09).
+- **Convergencia:** `convergence_symbols = -1` significa «no converge o no
+  aplica» (none, zf, mmse); la interfaz muestra «—». Se mide sobre mediana
+  móvil. El CMA usa `mu · CMA_MU_SCALE` (0,1) y paso normalizado.
+- **EVM saturada en 100 %** (`metrics.symbol_mse`): por encima solo significa
+  que el receptor no enganchó.
+- **Pruebas: VERIFICADO**, `.venv\Scripts\python -m pytest -q tests` → 37
+  pasan en ~55 s (`test_comm2`, `test_campana`, `test_robustez`). `pytest` se
+  instaló en `.venv`; no está en `requirements.txt`.
+- Remotos: `origin` = LURAYD, `dake` = dake14.
+
 **Sesión del canal `h` (2026-09-25):** `src/comm2` sí se modificó, solo con
 añadidos compatibles: `MultipathProfile.from_taps`, `channel.get_profile /
 parse_taps / format_taps`, `metrics.isi_metrics / estimate_symbol_channel /

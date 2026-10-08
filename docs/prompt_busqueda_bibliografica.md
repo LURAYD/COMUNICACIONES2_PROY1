@@ -35,7 +35,6 @@ Python (NumPy/SciPy) sin bibliotecas de comunicaciones de terceros:
 - Ecualización: LMS normalizado, RLS, Zero-Forcing, MMSE y CMA, con métricas de
   BER, MSE residual, velocidad de convergencia y coste computacional en
   multiplicaciones reales por símbolo.
-- Validación cruzada contra GNU Radio 3.10 mediante ficheros complex64.
 - Campaña reproducible bit a bit (semilla derivada por realización) y pruebas
   que comprueban propiedades teóricas, no valores grabados.
 - Interfaz de escritorio que permite observar la señal en ocho puntos de
@@ -63,7 +62,7 @@ gastes esfuerzo en redescubrirlo; lo que necesito es lo que hay MÁS ALLÁ.
    a TOLERANCIAS DE COMPONENTES, no a elección de algoritmo.
 
 3. Existe una literatura amplia y activa sobre enseñanza de comunicaciones
-   digitales con SDR y GNU Radio, en ASEE, Frontiers in Education e IEEE
+   digitales con SDR, en ASEE, Frontiers in Education e IEEE
    Transactions on Education.
 
 Si encuentras que alguno de estos tres puntos es incorrecto o está matizado,
@@ -89,8 +88,7 @@ P2. ¿Se ha publicado la observación de que el factor de olvido del RLS es
     atribuirlo correctamente, no para reclamarlo.
 
 P3. ¿Existe alguna metodología publicada de VALIDACIÓN CRUZADA REPRODUCIBLE
-    entre un simulador propio y GNU Radio (o entre dos herramientas de
-    simulación de capa física), con criterios cuantitativos de consistencia?
+    entre dos herramientas de simulación de capa física, con criterios cuantitativos de consistencia?
 
 P4. En la literatura de enseñanza de comunicaciones digitales, ¿existe algún
     trabajo que presente una herramienta que permita observar la señal en
