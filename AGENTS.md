@@ -136,7 +136,8 @@ momento del import.
 | Una corrida de `run_link` | **0,177 s** (4000 símbolos, esc. C, LMS) | base de toda la interactividad |
 | Con curva de comparación LMS↔RLS | 0,433 s | `Request.compare=True` dispara una segunda corrida |
 | EVM `preeq` → `posteq` (esc. C, 12 dB) | 77,1 % → 31,1 % | invariante 4.1 |
-| Apertura del ojo en las 8 etapas | 1,000 / 0,767 / 0,090 / 0,099 / 0,105 / 0,087 / 0,467 / 0,483 | perfil del camino de la señal |
+| Apertura del ojo en las 8 etapas (esc. C, 12 dB) | 1,000 / 0,767 / 0,090 / 0,111 / 0,116 / 0,116 / 0,484 / 0,482 | perfil del camino de la señal; medida tras quitar el giro lento de portadora (antes 0,099 / 0,105 / 0,087 / 0,467, contaminadas por el giro) |
+| Ojo tras el filtro adaptado en AWGN (esc. A, 12 dB) | 0,112 con el giro residual → **0,709** sin él | el estimador grueso deja ~11 Hz: 16° en los 600 símbolos del ojo, >90° en la ventana de medida |
 | GNU Radio | **3.10.9.2** (radioconda, Py 3.11.7) | `detect()` |
 | `tx_qpsk_canal.grc` ejecuta | 0,15 s, 160 000 muestras | headless vía `grc_driver.py` |
 | Ancho de banda ocupado 99 % | Python 145,51 kHz / GRC 145,51 kHz (**+0,0 %**) | validación cruzada |
@@ -212,6 +213,34 @@ vuelven.
     (`<span style='background:…'>`) o letras normales.
 11c. **pyqtgraph pone prefijo SI a ejes sin unidades**: ±0,5 Rs sale como
     «±500 (x0.001)». `axis.enableAutoSIPrefix(False)` (ver `isiview._no_si`).
+
+11d. **Un lienzo con `setLogMode(y=True)` recibe datos LINEALES.** pyqtgraph
+    aplica el log10 él mismo; pasarle `log10(BER)` es un logaritmo doble
+    (NaN) y no se dibuja nada, sin error. Así estuvo la vista de campaña hasta
+    el 2026-09-27. Los rangos (`setYRange`) y las `InfiniteLine`, en cambio,
+    van en coordenadas de la vista, es decir, en décadas.
+11e. **`gnuradio-companion.exe` lanzado directamente muere al arrancar**
+    (`AssertionError` en `gi/overrides`: GTK no encuentra Pango sin el entorno
+    de conda activado). Hay que lanzarlo como el menú Inicio:
+    `pythonw cwp.py --no-console <radioconda> gnuradio-companion.exe <.grc>`
+    (ver `grcview.companion_command`). VERIFICADO: así abre
+    `rx_qpsk_desde_python.grc`.
+11f. **Señal de un `QThread` conectada a una función suelta** se ejecuta en el
+    hilo del trabajador, no en el de la interfaz. Llamar ahí a `grab()` o
+    tocar widgets cuelga. Conectar siempre a métodos de un `QObject` que viva
+    en el hilo principal (conexión en cola).
+
+11g. **Diagrama de ojo: tres fallos que se sumaban (corregidos 2026-09-27).**
+    (1) Se centraba en `fase óptima + sps/2`: el instante de decisión caía en
+    t = ±T/2 y en el centro quedaba el cruce. (2) Sin `connect="finite"`
+    (ver 11d), las rectas de unión entre trazas cruzaban el panel. (3) El giro
+    lento de portadora cerraba el ojo de la componente I sin haber ISI: ahora
+    `metrics.slow_phase` lo quita antes de medir y dibujar (tras el filtro
+    adaptado y en las etapas a tasa de símbolo; en «Canal» no). Las etapas a
+    tasa de símbolo muestran el ojo reconstruido con el coseno alzado
+    (interpolación de Nyquist), rotulado «desde los símbolos». Color de las
+    trazas: `T.EYE`, rojo puro en claro y amarillo puro en oscuro (el amarillo
+    sobre blanco tiene contraste 1,07:1).
 
 ### En herramientas de línea de órdenes
 

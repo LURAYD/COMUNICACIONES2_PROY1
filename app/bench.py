@@ -250,14 +250,14 @@ class Bench(QWidget):
             self.p_const.set_note("muestreada en el instante óptimo")
 
         self.p_eye.set_title(f"Diagrama de ojo  ·  {st.title}")
-        if st.kind == SYMBOL:
-            self.eye.show_wave(None, self.res.sps, tap.opening)
-            self.p_eye.set_note("no medible en este punto", T.INK_GHOST)
-        else:
-            self.eye.show_wave(tap.wave, self.res.sps, tap.opening)
-            op = tap.opening
-            col = T.GOOD if op > 0.5 else (T.WARNING if op > 0.2 else T.CRITICAL)
-            self.p_eye.set_note(f"apertura {op:.3f}", col)
+        # En las etapas a tasa de símbolo el ojo se reconstruye desde los
+        # símbolos (ver engine.simulate): se dice en la nota, para que no se
+        # confunda con una forma de onda medida.
+        self.eye.show_wave(tap.wave, self.res.sps, tap.opening)
+        op = tap.opening
+        col = T.GOOD if op > 0.5 else (T.WARNING if op > 0.2 else T.CRITICAL)
+        rec = "  ·  desde los símbolos" if st.kind == SYMBOL else ""
+        self.p_eye.set_note(f"apertura {op:.3f}{rec}", col)
 
         bw = (1.0 + self.res.req.beta)
         self.p_spec.set_note(f"B = {bw:.2f} Rs")

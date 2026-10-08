@@ -208,7 +208,9 @@ class Campaign(QWidget):
         self.controls = controls
         self._running = False
         self._curves: list = []
-        self._data: list[tuple[list, list]] = []
+        self._colors: list[str] = []
+        # por serie: x, BER lineal, y si el punto es cota (cero errores)
+        self._data: list[tuple[list, list, list]] = []
         self._floor = 1.0
 
         root = QVBoxLayout(self)
@@ -332,7 +334,8 @@ class Campaign(QWidget):
             self.pi.removeItem(c)
         self._curves, self.theory_curves = [], []
         self.legend.clear()
-        self._data = [([], []) for _ in sw.series]
+        self._data = [([], [], []) for _ in sw.series]
+        self._colors = [ser.color for ser in sw.series]
 
         for ser in sw.series:
             c = self.pi.plot([], [], pen=pg.mkPen(ser.color, width=1.9),
@@ -385,7 +388,7 @@ class Campaign(QWidget):
             self.run_btn.setEnabled(False)
             return
         sw = self._sweep()
-        self._data = [([], []) for _ in sw.series]
+        self._data = [([], [], []) for _ in sw.series]
         for c in self._curves:
             c.setData([], [])
         self._draw_theory(sw)
@@ -413,7 +416,10 @@ class Campaign(QWidget):
         for ser in sw.series:
             req = ser.mutate(base)
             y = Modulation(req.mod).ber_theory(xs)
-            c = self.pi.plot(xs, np.log10(np.maximum(y, 1e-12)),
+            # El lienzo esta en modo logaritmico (setLogMode): recibe la BER
+            # LINEAL y aplica el log10 el mismo. Pasarle log10(BER) era un
+            # logaritmo doble: log10 de un negativo = NaN y no se dibujaba nada.
+            c = self.pi.plot(xs, np.maximum(y, 1e-12),
                              pen=pg.mkPen(ser.color, width=1.1,
                                           style=Qt.PenStyle.DashLine))
             c.setZValue(-5)
@@ -425,13 +431,22 @@ class Campaign(QWidget):
     def _on_point(self, si: int, x: float, ber: float, bits: int) -> None:
         if not np.isfinite(ber):
             return
-        # Sin errores: la medida es una cota, y se dibuja en el suelo.
-        y = ber if ber > 0 else (1.0 / bits if bits else self._floor)
-        xs, ys = self._data[si]
+        # Sin errores: la medida es una cota, y se dibuja en el suelo con
+        # marcador hueco, para que no se lea como un valor medido.
+        cota = ber <= 0
+        y = 1.0 / bits if (cota and bits) else (self._floor if cota else ber)
+        xs, ys, cs = self._data[si]
         xs.append(x)
-        ys.append(np.log10(max(y, 1e-12)))
-        self._curves[si].setData(xs, ys)
-        lo = min([min(d[1]) for d in self._data if d[1]] + [-1.0])
+        ys.append(max(y, 1e-12))            # lineal: el lienzo aplica el log10
+        cs.append(cota)
+        col = self._colors[si]
+        self._curves[si].setData(
+            xs, ys,
+            symbolBrush=[pg.mkBrush(T.PANEL if c else col) for c in cs],
+            symbolPen=[pg.mkPen(col, width=1.6) if c else pg.mkPen(T.PANEL, width=1.4)
+                       for c in cs])
+        # el rango de la vista, en cambio, va en decadas (coordenadas log10)
+        lo = min([np.log10(min(d[1])) for d in self._data if d[1]] + [-1.0])
         self.pi.setYRange(max(lo - 0.4, -7.5), 0.1, padding=0)
 
     @Slot(int, int)

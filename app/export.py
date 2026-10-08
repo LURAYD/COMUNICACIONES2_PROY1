@@ -108,19 +108,22 @@ def run(req: Request, out_dir: Path, verbose: bool = True) -> SimResult:
         _grab(p, PANEL_SIZE, out_dir / f"constelacion_{st.key}.png")
     say(f"  constelacion_*.png  ({sum(1 for s in STAGES)} etapas)")
 
-    # --- ojo, solo donde es medible -----------------------------------------
+    # --- ojo en las ocho etapas ---------------------------------------------
+    # En las de tasa de símbolo se reconstruye desde los símbolos (ver
+    # engine.simulate) y la nota lo dice.
     n_eye = 0
     for st in STAGES:
-        if st.kind == SYMBOL:
-            continue                          # ya está a tasa de símbolo
         tap = res.taps[st.key]
+        if tap.wave is None:
+            continue
         e = Eye()
         e.show_wave(tap.wave, res.sps, tap.opening)
         p = _panel(f"Diagrama de ojo  ·  {st.title}", e)
-        p.set_note(f"apertura {tap.opening:.3f}")
+        rec = "  ·  desde los símbolos" if st.kind == SYMBOL else ""
+        p.set_note(f"apertura {tap.opening:.3f}{rec}")
         _grab(p, PANEL_SIZE, out_dir / f"ojo_{st.key}.png")
         n_eye += 1
-    say(f"  ojo_*.png  ({n_eye} puntos medibles)")
+    say(f"  ojo_*.png  ({n_eye} etapas)")
 
     # --- espectro y convergencia --------------------------------------------
     sp = Spectrum()

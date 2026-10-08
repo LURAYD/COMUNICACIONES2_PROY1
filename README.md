@@ -79,7 +79,7 @@ python -m app --export salida --escenario C --ebn0 12 --eq lms
 ```
 
 Corre la simulación, renderiza los instrumentos fuera de pantalla y escribe la
-cadena, las ocho constelaciones, los tres diagramas de ojo medibles, el espectro,
+cadena, las ocho constelaciones, los ocho diagramas de ojo, el espectro,
 la convergencia y un `medidas.csv` con BER, SER, EVM, MSE, convergencia, coste y
 la apertura del ojo en cada punto. No sustituye a `experiments/run_all.py`, que
 genera las figuras del informe en matplotlib: esto genera las del instrumento,

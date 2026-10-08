@@ -192,8 +192,14 @@ class Eye(Display):
         _label(self.pi, "amplitud (I)", "tiempo [T]")
         self.pi.setXRange(-1, 1, padding=0)
 
-        self.bloom = pg.PlotCurveItem(pen=pg.mkPen(T.rgba(T.SIGNAL, T.EYE_BLOOM), width=4.5))
-        self.trace = pg.PlotCurveItem(pen=pg.mkPen(T.rgba(T.SIGNAL_HI, T.EYE_TRACE), width=1.0))
+        # connect="finite": las 300 trazas van en un solo camino separado por
+        # NaN, y sin esto pyqtgraph 0.14 NO corta en los NaN: une el final de
+        # cada traza (t = +T) con el principio de la siguiente (t = -T) y
+        # cruza el panel con rectas diagonales que no son senal.
+        self.bloom = pg.PlotCurveItem(pen=pg.mkPen(T.rgba(T.EYE, T.EYE_BLOOM), width=4.5),
+                                      connect="finite")
+        self.trace = pg.PlotCurveItem(pen=pg.mkPen(T.rgba(T.EYE, T.EYE_TRACE), width=1.0),
+                                      connect="finite")
         self.pi.addItem(self.bloom)
         self.pi.addItem(self.trace)
 
@@ -222,9 +228,18 @@ class Eye(Display):
         wave = wave / rms
 
         off = metrics.best_sampling_phase(wave, sps)
-        # Centrar el ojo en el instante de muestreo optimo, no en la muestra 0.
-        t, seg = metrics.eye_data(np.real(wave), sps, n_traces=300, span=2,
-                                  offset=int(off + sps // 2) % sps)
+        # Trazas de -T a +T centradas en cada instante de muestreo optimo, una
+        # por simbolo (se solapan un periodo, como en un osciloscopio con
+        # disparo de reloj). Antes se centraba en `off + sps/2`: el instante de
+        # decision caia en t = +-T/2 y en el centro quedaba el CRUCE, no la
+        # apertura.
+        x = np.real(wave)
+        L = 2 * sps + 1
+        centers = off + sps * np.arange(1, 1 + max(0, (x.size - off - sps - 1) // sps))
+        centers = centers[:300]
+        t = (np.arange(L) - sps) / sps
+        seg = (x[centers[:, None] - sps + np.arange(L)[None, :]]
+               if centers.size else np.zeros((0, L)))
         if seg.shape[0] == 0:
             self._unavailable("Tramo demasiado corto para trazar el ojo.")
             return

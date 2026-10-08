@@ -100,6 +100,10 @@ LIGHT = dict(
     CORE_ALPHA=0.78,
     EYE_BLOOM=0.045,
     EYE_TRACE=0.13,
+    # Trazas del ojo: probado rojo puro frente a amarillo puro (2026-09-27).
+    # Sobre blanco el amarillo casi desaparece (contraste 1,07:1, invisible en
+    # un proyector); el rojo se lee mejor incluso que el violeta de la senal.
+    EYE="#ff0000",
 
     GOOD="#0ca30c", WARNING="#fab219", SERIOUS="#ec835a", CRITICAL="#d03b3b",
 
@@ -135,6 +139,9 @@ DARK = dict(
     CORE_ALPHA=0.85,
     EYE_BLOOM=0.055,
     EYE_TRACE=0.16,
+    # Sobre fondo oscuro gana el amarillo puro: el fosforo de osciloscopio.
+    # El rojo puro sobre negro queda apagado donde se acumulan las trazas.
+    EYE="#ffff00",
 
     GOOD="#0ca30c", WARNING="#fab219", SERIOUS="#ec835a", CRITICAL="#d03b3b",
 
@@ -147,7 +154,7 @@ MODE = "light"
 GROUND = PANEL = RAISED = HEADER = RAISED_SOLID = RAISED_HI = RULE = RULE_STRONG = ""
 INK = INK_DIM = INK_FAINT = INK_GHOST = ""
 S1 = S2 = S3 = S4 = S5 = S6 = ""
-SIGNAL = SIGNAL_HI = SIGNAL_ALT = REFERENCE = ""
+SIGNAL = SIGNAL_HI = SIGNAL_ALT = REFERENCE = EYE = ""
 GOOD = WARNING = SERIOUS = CRITICAL = ""
 ACCENT = ACCENT_WARM = ACCENT_HI = ""
 SCRIM = HALO_ALPHA = CORE_ALPHA = EYE_BLOOM = EYE_TRACE = PROFILE_FILL = 0.0

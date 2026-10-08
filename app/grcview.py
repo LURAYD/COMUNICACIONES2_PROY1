@@ -35,7 +35,7 @@ from typing import Optional
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QObject, QProcess, QThread, Qt, Signal, Slot
+from PySide6.QtCore import QObject, QThread, QTimer, Qt, Signal, Slot
 from PySide6.QtWidgets import (QGridLayout, QHBoxLayout, QPushButton,
                                QVBoxLayout, QWidget)
 
@@ -115,6 +115,44 @@ def detect() -> GrcInstall:
                 inst.problem = f"{type(exc).__name__}: {exc}"
             return inst
     return GrcInstall(problem="No se encontró ninguna instalación de GNU Radio.")
+
+
+def companion_command(inst: GrcInstall, grc_file: Path) -> list[str]:
+    """Orden para abrir GNU Radio Companion como lo hace el menú Inicio.
+
+    `Scripts/gnuradio-companion.exe` lanzado a pelo MUERE al arrancar: sin el
+    entorno de conda activado, GTK no encuentra Pango y `gi/overrides` lanza un
+    AssertionError (medido). El acceso directo oficial de radioconda no lanza el
+    .exe: ejecuta `python cwp.py <prefijo> gnuradio-companion.exe`, y `cwp.py`
+    es quien activa el entorno. Aquí se hace lo mismo, con `pythonw` para que
+    no aparezca una consola y `--no-console` para la del propio lanzador.
+    """
+    root = inst.python.parent
+    cwp = root / "cwp.py"
+    if cwp.exists():
+        pyw = root / "pythonw.exe"
+        launcher = pyw if pyw.exists() else inst.python
+        return [str(launcher), str(cwp), "--no-console", str(root),
+                str(inst.companion), str(grc_file)]
+    return [str(inst.companion), str(grc_file)]
+
+
+def _clean_env() -> dict:
+    """Entorno sin rastro del .venv del simulador.
+
+    La aplicación corre dentro de .venv; si Companion heredara VIRTUAL_ENV,
+    PYTHONHOME o el Scripts del .venv en el PATH, mezclaría intérpretes, que es
+    justo lo que la separación de entornos del proyecto prohíbe.
+    """
+    env = dict(os.environ)
+    for k in ("VIRTUAL_ENV", "PYTHONHOME", "PYTHONPATH", "PYTHONEXECUTABLE",
+              "__PYVENV_LAUNCHER__"):
+        env.pop(k, None)
+    venv = str(Path(sys.prefix).resolve()).lower()
+    env["PATH"] = os.pathsep.join(
+        d for d in env.get("PATH", "").split(os.pathsep)
+        if d and not str(Path(d)).lower().startswith(venv))
+    return env
 
 
 # ---------------------------------------------------------------------------
@@ -275,7 +313,12 @@ class GrcView(QWidget):
         super().__init__(parent)
         self.inst = detect()
         self._busy = False
-        self._proc: Optional[QProcess] = None
+        self._proc: Optional[subprocess.Popen] = None
+        self._proc_log: Optional[Path] = None
+        self._proc_checks = 0
+        self._watch = QTimer(self)
+        self._watch.setInterval(1000)
+        self._watch.timeout.connect(self._check_companion)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(18, 16, 18, 16)
@@ -419,15 +462,65 @@ class GrcView(QWidget):
         self._launch.emit((self.inst, float(self.noise.value()), 0.0))
 
     def _open_companion(self) -> None:
+        """Abre Companion desacoplado y vigila los primeros segundos.
+
+        Desacoplado: cerrar el banco de pruebas no debe cerrar Companion ni
+        perder lo que se esté editando allí. Vigilado: si muere al arrancar, se
+        dice por qué, en vez de que el botón parezca no hacer nada.
+        """
         if not self.inst.companion:
             return
-        self._proc = QProcess(self)
-        self._proc.setWorkingDirectory(str(GRC_DIR))
-        self._proc.start(str(self.inst.companion),
-                         [str(GRC_DIR / "rx_qpsk_desde_python.grc")])
-        self._say("GNU Radio Companion se está abriendo con el flowgraph de "
-                  "receptor. Sus sumideros gráficos se muestran en ventanas "
-                  "propias de GNU Radio.", T.INK_DIM)
+        if self._proc is not None and self._proc.poll() is None:
+            self._say("GNU Radio Companion ya está abierto: búscalo en la barra "
+                      "de tareas.", T.INK_DIM)
+            return
+        grc = GRC_DIR / "rx_qpsk_desde_python.grc"
+        self._proc_log = Path(tempfile.gettempdir()) / "comm2_companion.log"
+        flags = 0
+        for name in ("DETACHED_PROCESS", "CREATE_NEW_PROCESS_GROUP"):
+            flags |= getattr(subprocess, name, 0)
+        try:
+            with open(self._proc_log, "w", encoding="utf-8") as log:
+                self._proc = subprocess.Popen(
+                    companion_command(self.inst, grc), cwd=str(GRC_DIR),
+                    env=_clean_env(), stdout=log, stderr=subprocess.STDOUT,
+                    stdin=subprocess.DEVNULL, creationflags=flags)
+        except OSError as exc:
+            self._say(f"No se pudo lanzar GNU Radio Companion: {exc}", T.SERIOUS)
+            return
+        falta = not (IO_DIR / "py_tx_signal.cf32").exists()
+        self._say("Abriendo GNU Radio Companion con el flowgraph del receptor "
+                  "(activando el entorno de radioconda: tarda unos segundos)."
+                  + ("  Ojo: falta grc/io/py_tx_signal.cf32; genéralo con "
+                     "«Compilar y ejecutar» o con exp6_validacion_grc.py --export "
+                     "antes de ejecutar el flowgraph." if falta else ""),
+                  T.SERIOUS if falta else T.INK_DIM)
+        self.btn_open.setEnabled(False)
+        self._proc_checks = 0
+        self._watch.start()
+
+    def _check_companion(self) -> None:
+        self._proc_checks += 1
+        code = self._proc.poll() if self._proc is not None else 0
+        if code is None and self._proc_checks < 15:
+            return                       # sigue arrancando o ya está abierto
+        self._watch.stop()
+        self.btn_open.setEnabled(True)
+        if code is None:
+            self._say("GNU Radio Companion está abierto con "
+                      "rx_qpsk_desde_python.grc. Sus sumideros gráficos se "
+                      "muestran en ventanas propias de GNU Radio.", T.GOOD)
+        elif code != 0:
+            tail = ""
+            try:
+                lines = [ln.strip() for ln in self._proc_log.read_text(
+                    encoding="utf-8", errors="replace").splitlines() if ln.strip()]
+                tail = lines[-1][:160] if lines else ""
+            except OSError:
+                pass
+            self._say(f"GNU Radio Companion se cerró al arrancar (código {code})"
+                      f"{': ' + tail if tail else ''}. Registro completo en "
+                      f"{self._proc_log}.", T.SERIOUS)
 
     @Slot(object)
     def _on_done(self, res: dict) -> None:
