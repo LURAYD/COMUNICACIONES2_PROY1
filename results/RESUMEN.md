@@ -18,7 +18,7 @@ Configuracion base: `fs=1.000 MHz | sps=8 | Rs=125.0 kBd | mod=QPSK (k=2) | Rb=2
 | flat | 0.000 | 0.764 | 14.3 | < 1e-6 |
 | mild | 0.264 | 0.672 | 20.1 | < 1e-6 |
 | moderate | 0.622 | 0.115 | 63.6 | 6.11e-02 |
-| severe | 1.145 | 0.083 | 502.4 | 4.64e-01 |
+| severe | 1.145 | 0.083 | 100.0 | 4.64e-01 |
 
 
 ## Experimento 3 — comparacion de ecualizadores
@@ -26,29 +26,29 @@ Configuracion base: `fs=1.000 MHz | sps=8 | Rs=125.0 kBd | mod=QPSK (k=2) | Rb=2
 | Metodo | BER | MSE residual [dB] | Convergencia a -9 dB [simb] | Mult. reales/simbolo | Orden |
 |---|---|---|---|---|---|
 | Sin ecualizar | 6.11e-02 | -3.90 | -1 | 0 | - |
-| LMS (metodo A) | 2.50e-05 | -12.18 | 78 | 168 | O(N) |
-| RLS (metodo B) | < 1e-6 | -11.51 | 60 | 7392 | O(N^2) |
+| LMS (metodo A) | 2.50e-05 | -12.15 | 78 | 168 | O(N) |
+| RLS (metodo B) | < 1e-6 | -11.48 | 60 | 7392 | O(N^2) |
 | Zero-Forcing (canal conocido) | 2.50e-05 | -12.28 | 4 | 84 | O(N) |
 | MMSE (canal conocido) | < 1e-6 | -12.34 | 5 | 84 | O(N) |
-| CMA (ciego) | 7.50e-05 | -10.26 | 1310 | 172 | O(N) |
+| CMA (ciego) | 9.72e-03 | -7.92 | 13448 | 172 | O(N) |
 
 
 ## Experimento 3 — sensibilidad a mu y lambda
 
 | Metodo | Parametro | Valor | BER | MSE residual [dB] | Convergencia a -6 dB |
 |---|---|---|---|---|---|
-| lms | mu | 0.02 | 2.15e-03 | -5.69 | 135 |
+| lms | mu | 0.02 | 2.15e-03 | -5.72 | 135 |
 | lms | mu | 0.05 | 3.58e-03 | -5.41 | 119 |
 | lms | mu | 0.1 | 2.00e-04 | -9.87 | 67 |
-| lms | mu | 0.2 | 7.50e-05 | -11.64 | 61 |
-| lms | mu | 0.5 | 2.50e-05 | -12.18 | 34 |
-| lms | mu | 1.0 | 1.00e-04 | -11.90 | 57 |
-| rls | lambda | 0.95 | 4.50e-04 | -10.51 | 41 |
-| rls | lambda | 0.98 | 7.50e-05 | -11.90 | 41 |
-| rls | lambda | 0.99 | 5.00e-05 | -12.30 | 41 |
-| rls | lambda | 0.995 | 2.50e-05 | -12.46 | 41 |
-| rls | lambda | 0.999 | < 1e-6 | -11.51 | 41 |
-| rls | lambda | 1.0 | < 1e-6 | -6.00 | 41 |
+| lms | mu | 0.2 | 7.50e-05 | -11.62 | 61 |
+| lms | mu | 0.5 | 2.50e-05 | -12.15 | 34 |
+| lms | mu | 1.0 | 1.00e-04 | -11.86 | 57 |
+| rls | lambda | 0.95 | 4.50e-04 | -10.48 | 41 |
+| rls | lambda | 0.98 | 7.50e-05 | -11.86 | 41 |
+| rls | lambda | 0.99 | 5.00e-05 | -12.26 | 41 |
+| rls | lambda | 0.995 | 2.50e-05 | -12.42 | 41 |
+| rls | lambda | 0.999 | < 1e-6 | -11.48 | 41 |
+| rls | lambda | 1.0 | < 1e-6 | -6.09 | 41 |
 
 
 ## Experimento 4.3 — rango de adquisicion de frecuencia
