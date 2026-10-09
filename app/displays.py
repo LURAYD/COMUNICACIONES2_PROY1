@@ -22,7 +22,7 @@ from typing import Optional
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QEasingCurve, QTimer, Qt
+from PySide6.QtCore import QEasingCurve, QRectF, QTimer, Qt
 from PySide6.QtGui import QColor, QFont, QPen
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
@@ -192,6 +192,42 @@ class Constellation(Display):
 # ---------------------------------------------------------------------------
 
 EYE_UPSAMPLE = 4
+EYE_W, EYE_H = 420, 240     # resolucion de la imagen de densidad del ojo
+EYE_SUB = 3                 # subpasos por columna: rellena los flancos empinados
+
+
+def _eye_density(t: np.ndarray, seg: np.ndarray, lim: float) -> np.ndarray:
+    """Histograma 2D de las trazas del ojo, como imagen RGBA [x, y].
+
+    Es lo mismo que hace una pantalla de fosforo: el brillo de cada pixel es
+    cuantas trazas pasan por el. Pintarlo como imagen cuesta milisegundos; las
+    300 trazas con pincel ancho y alfa costaban ~0,7 s por ojo en QPainter.
+    """
+    from scipy.ndimage import gaussian_filter
+
+    n_col = EYE_W * EYE_SUB
+    pos = np.linspace(0.0, t.size - 1.0, n_col)
+    i0 = np.minimum(pos.astype(int), t.size - 2)
+    fr = pos - i0
+    y = seg[:, i0] * (1.0 - fr) + seg[:, i0 + 1] * fr          # (trazas, n_col)
+    yi = np.clip(((y + lim) / (2 * lim) * EYE_H).astype(int), 0, EYE_H - 1)
+    xi = np.broadcast_to(np.arange(n_col) // EYE_SUB, yi.shape)
+    hist = np.bincount((xi * EYE_H + yi).ravel(),
+                       minlength=EYE_W * EYE_H).reshape(EYE_W, EYE_H).astype(float)
+
+    # nucleo nitido + halo difuso, como las dos capas de la constelacion
+    core = hist / (hist.max() + 1e-12)
+    bloom = gaussian_filter(hist, 2.2)
+    bloom /= bloom.max() + 1e-12
+    d = np.clip(0.85 * core ** 0.55 + 0.45 * bloom ** 0.7, 0.0, 1.0)
+
+    lo, hi = QColor(T.SIGNAL), QColor(T.SIGNAL_HI)
+    c0 = np.array([lo.red(), lo.green(), lo.blue()], float)
+    c1 = np.array([hi.red(), hi.green(), hi.blue()], float)
+    rgba = np.empty((EYE_W, EYE_H, 4), np.uint8)
+    rgba[..., :3] = (c0 + (c1 - c0) * d[..., None]).astype(np.uint8)
+    rgba[..., 3] = (255 * d).astype(np.uint8)
+    return rgba
 
 
 class Eye(Display):
@@ -200,14 +236,10 @@ class Eye(Display):
         _label(self.pi, "amplitud (I)", "tiempo [T]")
         self.pi.setXRange(-1, 1, padding=0)
 
-        # connect="finite": los NaN separan trazas; con "all" (por defecto) se
-        # dibujaba una linea de retorno de cada traza a la siguiente.
-        self.bloom = pg.PlotCurveItem(pen=pg.mkPen(T.rgba(T.SIGNAL, T.EYE_BLOOM), width=4.5),
-                                      connect="finite")
-        self.trace = pg.PlotCurveItem(pen=pg.mkPen(T.rgba(T.SIGNAL_HI, T.EYE_TRACE), width=1.0),
-                                      connect="finite")
-        self.pi.addItem(self.bloom)
-        self.pi.addItem(self.trace)
+        # Imagen de densidad en lugar de trazas: ver `_eye_density`.
+        self.img = pg.ImageItem(axisOrder="col-major")
+        self.img.setZValue(1)
+        self.pi.addItem(self.img)
 
         self.mark = pg.InfiniteLine(pos=0, angle=90,
                                     pen=pg.mkPen(T.INK_FAINT, width=1,
@@ -256,18 +288,13 @@ class Eye(Display):
 
         self._set_axes(True)
         self.msg.setVisible(False)
-        # Un unico camino con NaN como separador: 300 trazas en una sola llamada.
-        nan = np.full((seg.shape[0], 1), np.nan)
-        ys = np.hstack([seg, nan]).ravel()
-        xs = np.tile(np.append(t, np.nan), seg.shape[0])
-        self.bloom.setData(xs, ys)
-        self.trace.setData(xs, ys)
 
         lim = float(np.nanpercentile(np.abs(seg), 99.5)) * 1.2 + 1e-9
+        self.img.setImage(_eye_density(t, seg, lim), autoLevels=False)
+        self.img.setRect(QRectF(float(t[0]), -lim, float(t[-1] - t[0]), 2 * lim))
         self.pi.setYRange(-lim, lim, padding=0)
         self.pi.setXRange(t[0], t[-1], padding=0)
-        self.bloom.setVisible(True)
-        self.trace.setVisible(True)
+        self.img.setVisible(True)
         self.mark.setVisible(True)
 
     def _set_axes(self, on: bool) -> None:
@@ -282,8 +309,7 @@ class Eye(Display):
         self.pi.getViewBox().setBackgroundColor(T.PANEL)
 
     def _unavailable(self, text: str) -> None:
-        self.bloom.setVisible(False)
-        self.trace.setVisible(False)
+        self.img.setVisible(False)
         self.mark.setVisible(False)
         self._set_axes(False)
         self.msg.setText(text)
@@ -322,13 +348,20 @@ class Spectrum(Display):
         self.leg.addItem(self.tx, "transmitido")
         self.leg.addItem(self.rx, "tras el canal")
 
-    def show(self, psd: dict, beta: float) -> None:
+    def show(self, psd: dict, beta: float, rx: bool = True) -> None:
+        """`rx=False` en la seccion de generacion: ahi aun no hay canal."""
         if "rrc" in psd:
             f, y = psd["rrc"]
             self.tx.setData(f, y)
-        if "chan" in psd:
+        if "chan" in psd and rx:
             f, y = psd["chan"]
             self.rx.setData(f, y)
+        else:
+            self.rx.setData([], [])
+        self.leg.clear()
+        self.leg.addItem(self.tx, "transmitido")
+        if rx:
+            self.leg.addItem(self.rx, "tras el canal")
         half = (1.0 + beta) / 2.0
         self.band.setRegion((-half, half))
 

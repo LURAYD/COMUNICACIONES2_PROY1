@@ -385,4 +385,6 @@ QTextBrowser, QPlainTextEdit {{
     background: {PANEL}; border: 1px solid {RULE};
     color: {INK_DIM}; selection-background-color: {SIGNAL}; selection-color: #ffffff;
 }}
+/* El QWidget global fija la sans: el codigo la recupera por nombre. */
+QPlainTextEdit#Code {{ font-family: "{MONO}"; font-size: 9pt; border: none; color: {INK}; }}
 """

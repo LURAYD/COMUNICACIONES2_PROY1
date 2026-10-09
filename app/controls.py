@@ -1,6 +1,9 @@
 """Rail de controles: los parametros del enlace, agrupados como en la guia.
 
-Senal / Canal / Receptor - el mismo orden en que la guia enumera los requisitos.
+Senal / Canal / Receptor - el mismo orden en que la guia enumera los requisitos,
+y el de las secciones de la ventana. Cada seccion muestra solo su grupo; los
+demas quedan resumidos en una linea arriba (pulsarla lleva a su seccion), porque
+siguen afectando al resultado y no pueden desaparecer sin rastro.
 Cada control se desactiva cuando el escenario o el metodo elegido lo dejan sin
 efecto (el perfil multitrayecto no existe en el escenario A; lambda solo gobierna
 al RLS), porque un control que no hace nada miente sobre lo que se esta midiendo.
@@ -55,6 +58,13 @@ class Controls(QScrollArea):
 
     changed = Signal()
     settled = Signal()
+    jump = Signal(str)          # seccion pedida desde el resumen: gen, chan, bench
+
+    # Grupos visibles en cada vista. La campana usa todos los valores del rail
+    # salvo el eje que barre; la ISI fija el escenario pero usa canal y receptor.
+    SECTION_GROUPS = {"gen": ("sig",), "chan": ("chan",), "bench": ("rx",),
+                      "isi": ("chan", "rx"), "camp": ("sig", "chan", "rx"),
+                      "export": ()}
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -70,6 +80,31 @@ class Controls(QScrollArea):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
+        # --------------------------------------------- resumen de lo oculto
+        self.ctx = QWidget()
+        cvl = QVBoxLayout(self.ctx)
+        cvl.setContentsMargins(15, 12, 15, 12)
+        cvl.setSpacing(6)
+        cvl.addWidget(panel_label("Configurado en otras secciones", T.INK_DIM))
+        self.ctx_btn = {}
+        for key, sec in (("sig", "gen"), ("chan", "chan"), ("rx", "bench")):
+            b = QPushButton("")
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setFont(T.font(9, 400, mono=True))
+            # Estilo en el propio boton, no en el contenedor: una hoja puesta
+            # en un contenedor se hereda a todos sus hijos.
+            b.setStyleSheet(
+                f"QPushButton {{ text-align: left; padding: 5px 8px; color: {T.INK_DIM};"
+                f" background: {T.PANEL}; border: 1px solid {T.RULE}; }}"
+                f"QPushButton:hover {{ color: {T.INK}; border-color: {T.SIGNAL}; }}")
+            b.clicked.connect(lambda _c=False, k=sec: self.jump.emit(k))
+            cvl.addWidget(b)
+            self.ctx_btn[key] = b
+        root.addWidget(self.ctx)
+        self.ctx_rule = HRule(T.RULE_STRONG)
+        root.addWidget(self.ctx_rule)
+        self.groups: dict[str, QWidget] = {}
+
         # ------------------------------------------------------------ SENAL
         g, v = _group("Señal")
         self.mod = LabeledCombo(
@@ -77,18 +112,12 @@ class Controls(QScrollArea):
             tip="QPSK es la modulación obligatoria (requisito 4.3). La segunda\n"
                 "modulación del proyecto es 16-QAM (requisito 4.4).")
         v.addWidget(self.mod)
-        self.ebn0 = SliderRow(
-            "Eb/N0", 0, 24, 12, 0.5, "{:.1f}", "dB",
-            tip="Energía por bit entre densidad espectral de ruido.\n"
-                "Es el eje de todas las curvas de BER.")
-        v.addWidget(self.ebn0)
         self.beta = SliderRow(
             "Roll-off del RRC", 0.10, 0.90, 0.35, 0.05, "{:.2f}", "",
             tip="Exceso de ancho de banda del coseno alzado.\n"
                 "B = Rs(1+β): más roll-off, más banda y ojo más robusto.")
         v.addWidget(self.beta)
-        root.addWidget(g)
-        root.addWidget(HRule(T.RULE_STRONG))
+        self._add_group("sig", g, root)
 
         # ------------------------------------------------------------ CANAL
         g, v = _group("Canal")
@@ -97,6 +126,12 @@ class Controls(QScrollArea):
         self.scen_note = text_label(SCENARIO_NOTE["C"], T.f_small(), T.INK_FAINT,
                                     wrap=True)
         v.addWidget(self.scen_note)
+        # El ruido es parte del canal: Eb/N0 vive aqui y no en la senal.
+        self.ebn0 = SliderRow(
+            "Eb/N0", 0, 24, 12, 0.5, "{:.1f}", "dB",
+            tip="Energía por bit entre densidad espectral de ruido.\n"
+                "Es el eje de todas las curvas de BER.")
+        v.addWidget(self.ebn0)
 
         self.profile = LabeledCombo(
             "Perfil multitrayecto", PROFILES, "moderate",
@@ -148,8 +183,7 @@ class Controls(QScrollArea):
             tip="Solo en el escenario D. Gobierna la velocidad del desvanecimiento:\n"
                 "es lo que hace relevante al factor de olvido del RLS.")
         v.addWidget(self.fd)
-        root.addWidget(g)
-        root.addWidget(HRule(T.RULE_STRONG))
+        self._add_group("chan", g, root)
 
         # --------------------------------------------------------- RECEPTOR
         g, v = _group("Receptor")
@@ -195,12 +229,24 @@ class Controls(QScrollArea):
             "de decisión: requisito 4.9 de la guía.")
         for cb in (self.cb_timing, self.cb_cfo, self.cb_pll, self.cb_mf):
             v.addWidget(cb)
-        root.addWidget(g)
+        self._add_group("rx", g, root)
         root.addStretch(1)
 
         self.setWidget(host)
         self._wire()
         self._sync_enabled()
+        self.set_view("bench")
+
+    def _add_group(self, key: str, g: QWidget, root: QVBoxLayout) -> None:
+        """El grupo y su raya inferior en un solo contenedor: se ocultan juntos."""
+        box = QWidget()
+        bv = QVBoxLayout(box)
+        bv.setContentsMargins(0, 0, 0, 0)
+        bv.setSpacing(0)
+        bv.addWidget(g)
+        bv.addWidget(HRule(T.RULE_STRONG))
+        root.addWidget(box)
+        self.groups[key] = box
 
     # -- cableado ------------------------------------------------------------
     def _wire(self) -> None:
@@ -210,6 +256,8 @@ class Controls(QScrollArea):
             s.moved.connect(lambda _v: self.changed.emit())
             s.settled.connect(lambda _v: self.settled.emit())
 
+        self.changed.connect(self._refresh_ctx)
+        self.settled.connect(self._refresh_ctx)
         self.scenario.changed.connect(self._on_scenario)
         for c in (self.mod, self.profile, self.eq):
             c.changed.connect(lambda _k: (self._sync_enabled(), self.settled.emit()))
@@ -274,9 +322,29 @@ class Controls(QScrollArea):
             self.h_note.setText("")
 
     def set_view(self, key: str) -> None:
-        """La vista activa decide qué controles tienen efecto."""
+        """La vista activa decide qué controles se ven y cuáles tienen efecto."""
         self._view = key
+        shown = self.SECTION_GROUPS.get(key, ("sig", "chan", "rx"))
+        for g, box in self.groups.items():
+            box.setVisible(g in shown)
+        hidden = [g for g in self.groups if g not in shown]
+        for g, b in self.ctx_btn.items():
+            b.setVisible(g in hidden)
+        self.ctx.setVisible(bool(hidden))
+        self.ctx_rule.setVisible(bool(hidden))
         self._sync_enabled()
+        self._refresh_ctx()
+
+    def _refresh_ctx(self) -> None:
+        mods, profs, eqs = dict(MODS), dict(PROFILES), dict(EQS)
+        s = self.scenario.current
+        chan = f"Esc. {s}" + ("" if s == "A" else f" · {profs[self.profile.value()]}")
+        eq = self.eq.value()
+        rx = eqs[eq].split("  ")[0] + ("" if eq == "none" else f" · N {int(self.taps.value())}")
+        self.ctx_btn["sig"].setText(
+            f"1 Señal     {mods[self.mod.value()]} · β {self.beta.value():.2f}")
+        self.ctx_btn["chan"].setText(f"2 Canal     {chan} · {self.ebn0.value():.1f} dB")
+        self.ctx_btn["rx"].setText(f"3 Receptor  {rx}")
 
     def _on_scenario(self, key: str) -> None:
         self.scen_note.setText(SCENARIO_NOTE[key])

@@ -1,7 +1,8 @@
-"""Banco de pruebas: la vista en vivo.
+"""Seccion de analisis del receptor: la vista en vivo.
 
-Camino de la senal arriba, cuatro instrumentos en el centro, lectura de medidas
-abajo. Todo responde al mismo resultado de simulacion; al cambiar de punto de
+Camino de la senal del receptor arriba (del filtro adaptado a la decision), los
+instrumentos que tienen sentido ahi en el centro, lectura de medidas abajo. La
+generacion y el canal tienen sus propias secciones (`sections.py`). Todo responde al mismo resultado de simulacion; al cambiar de punto de
 derivacion no se recalcula nada, solo se redibuja lo que ya esta medido.
 """
 
@@ -15,10 +16,14 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QGridLayout, QHBoxLayout, QVBoxLayout, QWidget)
 
 from . import theme as T
-from .displays import Constellation, Convergence, Eye, Spectrum
-from .engine import STAGE_BY_KEY, SYMBOL, SimResult
+from .displays import Constellation, Convergence, Eye
+from .engine import STAGE_BY_KEY, STAGES, SYMBOL, SimResult
 from .signalpath import SignalPath
 from .widgets import HRule, Panel, Readout, panel_label, text_label
+
+# Etapas del receptor: las de antes (simbolos, RRC, canal) viven en sus secciones.
+RX_STAGES = tuple(s for s in STAGES if s.key not in ("tx", "rrc", "chan"))
+ADAPTIVE = ("lms", "rls", "cma")
 
 
 def fmt_ber(ber: float, bits: int) -> tuple[str, str]:
@@ -102,24 +107,31 @@ class ReadoutBar(QWidget):
         self.cost = Readout("Coste", "mult/simb",
                             tip="Multiplicaciones reales por símbolo del ecualizador.\n"
                                 "LMS es O(N); RLS es O(N²).")
-        self.eta = Readout("Eficiencia", "b/s/Hz",
-                           tip="Rb / B = k / (1 + roll-off).")
 
-        rows = ((self.ber, self.theory, self.ser, self.evm, self.eta),
+        rows = ((self.ber, self.theory, self.ser, self.evm),
                 (self.mse, self.conv, self.cost))
+        # El separador va dentro de un contenedor con su lectura, para que al
+        # ocultar una medida (sin ecualizador) desaparezca tambien su raya.
+        self._cells = {}
         for n, items in enumerate(rows):
             h = QHBoxLayout()
             h.setSpacing(0)
             for i, r in enumerate(items):
+                cell = QWidget()
+                ch = QHBoxLayout(cell)
+                ch.setContentsMargins(0, 0, 0, 0)
+                ch.setSpacing(0)
                 if i:
                     sep = QWidget()
                     sep.setFixedWidth(1)
                     sep.setStyleSheet(f"background: {T.RULE_STRONG};")
-                    h.addSpacing(16)
-                    h.addWidget(sep)
-                    h.addSpacing(16)
+                    ch.addSpacing(16)
+                    ch.addWidget(sep)
+                    ch.addSpacing(16)
                 r.setMinimumWidth(r.sizeHint().width())
-                h.addWidget(r)
+                ch.addWidget(r)
+                h.addWidget(cell)
+                self._cells[r] = cell
             h.addStretch(1)
             if n == 1:
                 self.status = StatusDot()
@@ -128,7 +140,7 @@ class ReadoutBar(QWidget):
 
     def clear(self) -> None:
         for r in (self.ber, self.theory, self.ser, self.evm, self.mse,
-                  self.conv, self.cost, self.eta):
+                  self.conv, self.cost):
             r.set("--", T.INK_GHOST)
 
     def update_from(self, res: SimResult) -> None:
@@ -156,7 +168,11 @@ class ReadoutBar(QWidget):
         else:
             self.conv.set(f"{c}", T.INK, unit="simb")
         self.cost.set(f"{res.eq_flops}", T.INK)
-        self.eta.set(f"{s.get('eta_bps_hz', float('nan')):.2f}", T.INK)
+        # Sin ecualizador no hay MSE, convergencia ni coste que leer.
+        eq = res.req.eq_kind
+        self._cells[self.mse].setVisible(eq != "none")
+        self._cells[self.cost].setVisible(eq != "none")
+        self._cells[self.conv].setVisible(eq in ADAPTIVE)
         self.status.set_state(link_state(res))
 
 
@@ -178,7 +194,7 @@ class Bench(QWidget):
         cv.setContentsMargins(18, 16, 18, 16)
         cv.setSpacing(12)
 
-        self.path = SignalPath()
+        self.path = SignalPath(RX_STAGES)
         cv.addWidget(self.path)
 
         cap = QWidget()
@@ -214,18 +230,13 @@ class Bench(QWidget):
         self.eye_after.setVisible(False)
         self.p_eye.set_content(eyes)
 
-        self.p_spec = Panel("Densidad espectral")
-        self.spec = Spectrum()
-        self.p_spec.set_content(self.spec)
-
         self.p_conv = Panel("Convergencia del ecualizador")
         self.conv = Convergence()
         self.p_conv.set_content(self.conv)
 
         grid.addWidget(self.p_const, 0, 0)
         grid.addWidget(self.p_eye, 0, 1)
-        grid.addWidget(self.p_spec, 1, 0)
-        grid.addWidget(self.p_conv, 1, 1)
+        grid.addWidget(self.p_conv, 1, 0, 1, 2)
         grid.setColumnStretch(0, 1)
         grid.setColumnStretch(1, 1)
         grid.setRowStretch(0, 3)
@@ -257,8 +268,9 @@ class Bench(QWidget):
         self.readout.update_from(res)
         self.path.set_openings({k: t.opening for k, t in res.taps.items()})
         self.const.set_reference(res.ideal)
-        self.spec.show(res.psd, res.req.beta)
         self.conv.show(res)
+        # La convergencia solo existe en los ecualizadores adaptativos.
+        self.p_conv.setVisible(res.req.eq_kind in ADAPTIVE)
         self._show_stage(self.path.current, animate=not first)
 
     def _on_stage(self, key: str) -> None:
@@ -286,8 +298,6 @@ class Bench(QWidget):
 
         self._show_eye(key, st)
 
-        bw = (1.0 + self.res.req.beta)
-        self.p_spec.set_note(f"B = {bw:.2f} Rs")
         k = self.res.req.eq_kind.upper()
         self.p_conv.set_note("sin ecualizador" if k == "NONE" else f"método {k}")
 

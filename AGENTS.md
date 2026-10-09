@@ -278,6 +278,32 @@ Declarado explícitamente para que no se suponga implementado:
 
 ## 9. Estado del árbol de trabajo
 
+**Sesión de secciones (2026-10-08):** la ventana pasa a 4 secciones
+(`window.SECTIONS`): 1 Generación (`sections.GenView`), 2 Canal
+(`sections.ChanView`), 3 Análisis (`sections.AnalysisView` con sub-pestañas
+Receptor = `Bench`, ISI y ecualizador, Campaña) y 4 Exportar
+(`sections.ExportView`). Generación, canal y receptor leen el MISMO
+`SimResult` (una corrida). El rail muestra solo el grupo de la sección
+(`Controls.SECTION_GROUPS`) y resume los demás en botones que saltan a su
+sección; Eb/N0 se movió al grupo Canal. `Bench` solo enseña las etapas del
+receptor (`bench.RX_STAGES`, `SignalPath(stages)`), sin espectro, y oculta la
+convergencia y MSE/coste cuando no aplican. `SimResult` gana `papr_db`, `h_sym`,
+`sir_db`, `peak_distortion`. Nuevo `app/gnuradio_json.py`: JSON plano de
+variables de GRC sacado de `engine.build` (lo que el canal aplica de verdad),
+con complejos partidos en `_re`/`_im`. 37 pruebas pasan; `--export` intacto.
+
+**Rendimiento (misma sesión, medido en esta máquina, más lenta que la del §5):**
+`run_link` 0,51 s con 4000 símbolos, 0,17 s con 1000. Optimizaciones solo en
+`app/`: (1) `window._on_result` dibuja solo la vista visible y las demás al
+mostrarse (`_drawn`); al cambiar de sección no se recalcula si el último
+resultado cubre el rail (`_covers`); (2) el ojo es una imagen de densidad
+(`displays._eye_density`, histograma 2D + desenfoque) en lugar de 300 trazas con
+pincel ancho: 665 ms → ~110 ms; (3) la segunda corrida LMS↔RLS solo se pide en
+la vista Receptor (`_wanted`); (4) mientras se arrastra se simula con
+`PREVIEW_SYMBOLS = 1000`, y al soltar con los 4000. Siguiente paso posible, NO
+hecho: Numba en los bucles por símbolo de `src/comm2` (LMS, `hard_decide`, PLL,
+Gardner, CFO fino ≈ 0,5 s de los 0,51 s).
+
 **Sesión del canal `h` (2026-09-25):** `src/comm2` sí se modificó, solo con
 añadidos compatibles: `MultipathProfile.from_taps`, `channel.get_profile /
 parse_taps / format_taps`, `metrics.isi_metrics / estimate_symbol_channel /

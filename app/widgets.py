@@ -401,3 +401,23 @@ def checkbox(text: str, checked: bool = True, tip: str = "") -> QCheckBox:
     if tip:
         cb.setToolTip(tip)
     return cb
+
+
+class SectionHead(QWidget):
+    """Cabecera de seccion: numero, nombre y que hay que hacer en ella."""
+
+    def __init__(self, num: str, title: str, text: str = "", parent=None):
+        super().__init__(parent)
+        h = QHBoxLayout(self)
+        h.setContentsMargins(2, 0, 2, 2)
+        h.setSpacing(12)
+        n = QLabel(num)
+        n.setFont(T.font(15, 600, mono=True))
+        n.setStyleSheet(f"color: {T.SIGNAL}")
+        h.addWidget(n, 0, Qt.AlignmentFlag.AlignVCenter)
+        t = QLabel(title)
+        t.setFont(T.f_title())
+        t.setStyleSheet(f"color: {T.INK}")
+        h.addWidget(t, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.text = text_label(text, T.f_body(), T.INK_DIM, wrap=True)
+        h.addWidget(self.text, 1, Qt.AlignmentFlag.AlignVCenter)
