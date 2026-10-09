@@ -1,8 +1,16 @@
-"""Ventana principal: chasis, cabecera y conmutacion de vistas."""
+"""Ventana principal: chasis, cabecera y conmutacion de secciones.
+
+Cuatro secciones en el orden del enlace: generacion de onda, canal, analisis
+(receptor, ISI y campana como sub-pestanas) y exportar. Generacion, canal y
+receptor comparten la MISMA corrida de `run_link`: cambiar de seccion no
+recalcula, solo cambia que instrumentos se ven.
+"""
 
 from __future__ import annotations
 
-from PySide6.QtCore import QTimer, Qt
+from dataclasses import replace
+
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QHBoxLayout, QLabel, QMainWindow, QStackedWidget,
                                QVBoxLayout, QWidget)
 
@@ -11,13 +19,19 @@ from .backdrop import Backdrop
 from .bench import Bench
 from .campaign import Campaign
 from .controls import Controls
-from .engine import SimController, compare_isi
+from .engine import Request, SimController, compare_isi
 from .isiview import IsiView
-from .widgets import HRule, Segmented, panel_label, text_label
+from .sections import AnalysisView, ChanView, ExportView, GenView
+from .widgets import Segmented, text_label
 
-VIEWS = [("bench", "Banco de pruebas"), ("isi", "ISI y ecualizador"),
-         ("camp", "Campaña")]
-VIEW_INDEX = {"bench": 0, "isi": 1, "camp": 2}
+SECTIONS = [("gen", "1  Generación de onda"), ("chan", "2  Canal"),
+            ("ana", "3  Análisis"), ("export", "4  Exportar")]
+# Vistas que corren la simulacion del banco: las tres leen el mismo resultado.
+LIVE = ("gen", "chan", "bench")
+# Mientras se arrastra un control se simula con menos simbolos: la forma de las
+# graficas ya se ve, y al soltar llega la corrida completa con la que se mide.
+PREVIEW_SYMBOLS = 1000
+FULL_SYMBOLS = Request().n_payload
 
 
 class Header(QWidget):
@@ -42,8 +56,8 @@ class Header(QWidget):
         h.addLayout(left)
 
         h.addStretch(1)
-        self.views = Segmented(VIEWS, "bench", height=32, min_seg=124)
-        self.views.setMaximumWidth(560)
+        self.views = Segmented(SECTIONS, "gen", height=32, min_seg=150)
+        self.views.setMaximumWidth(760)
         h.addWidget(self.views)
         h.addStretch(1)
 
@@ -88,54 +102,122 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         self.stack.setObjectName("Stack")
         self.stack.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.gen = GenView()
+        self.chan = ChanView()
         self.bench = Bench()
         self.isi = IsiView()
         self.campaign = Campaign(self.controls)
-        self.stack.addWidget(self.bench)
-        self.stack.addWidget(self.isi)
-        self.stack.addWidget(self.campaign)
+        self.analysis = AnalysisView(self.bench, self.isi, self.campaign)
+        self.export = ExportView(self.controls.request)
+        self.pages = {"gen": self.gen, "chan": self.chan, "ana": self.analysis,
+                      "export": self.export}
+        for w in self.pages.values():
+            self.stack.addWidget(w)
         bh.addWidget(self.stack, 1)
 
         rv.addWidget(body, 1)
         self.setCentralWidget(root)
 
         # -- cableado --------------------------------------------------------
-        self.controls.changed.connect(lambda: self._run(compare=False))
+        self.controls.changed.connect(lambda: self._run(compare=False, preview=True))
         self.controls.settled.connect(lambda: self._run(compare=True))
+        self.controls.jump.connect(self._jump)
         self.sim.result.connect(self._on_result)
-        self.sim.error.connect(self.bench.set_error)
+        self.sim.error.connect(self._on_error)
         self.sim.busy.connect(self.bench.set_busy)
         self.isi_sim.result.connect(self.isi.apply)
         self.isi_sim.error.connect(self.isi.set_error)
         self.isi_sim.busy.connect(self.isi.set_busy)
-        self.header.views.changed.connect(self._on_view)
+        self.header.views.changed.connect(self._on_section)
+        self.analysis.changed.connect(lambda _k: self._on_view())
 
-        self._update_spec()
-        QTimer.singleShot(60, lambda: self._run(compare=True))
+        self._last = None           # ultimo resultado del banco
+        self._drawn: set[str] = set()   # vistas que ya lo tienen dibujado
+        self._on_view()
+
+    # -- vista activa --------------------------------------------------------
+    def _view(self) -> str:
+        """gen, chan, bench, isi, camp o export."""
+        sec = self.header.views.current
+        return self.analysis.current if sec == "ana" else sec
+
+    def _on_section(self, key: str) -> None:
+        self.stack.setCurrentWidget(self.pages[key])
+        self._on_view()
+
+    def _jump(self, view: str) -> None:
+        """Desde el resumen del rail: `view` es gen, chan o bench."""
+        sec = "ana" if view == "bench" else view
+        if sec == "ana":
+            self.analysis.tabs.set_value("bench")
+            self.analysis._on_tab("bench")
+        self.header.views.set_value(sec)
+        self._on_section(sec)
+
+    def _on_view(self) -> None:
+        key = self._view()
+        # Exportar no tiene controles propios: el rail no tiene nada que hacer.
+        self.controls.setVisible(key != "export")
+        # El rail sigue vivo en la campana porque el barrido USA sus valores
+        # (taps, paso, perfil, entrenamiento) para todo salvo el eje que barre.
+        self.controls.set_view(key)
+        if key == "export":
+            self.export.refresh()
+        # Generacion, canal y receptor comparten la corrida: si el ultimo
+        # resultado ya corresponde al rail, solo se dibuja en la vista nueva.
+        # Si el rail cambio entretanto (en ISI o campana), se recalcula: la
+        # vista no puede ensenar un resultado de otros parametros.
+        if key in LIVE and self._last is not None and self._covers(self._last.req):
+            self._draw(key)
+            return
+        self._run(compare=True)
 
     # -- ciclo ---------------------------------------------------------------
-    def _run(self, compare: bool) -> None:
-        cur = self.stack.currentWidget()
-        if cur is self.bench:
-            self.sim.submit(self.controls.request(compare=compare))
-        elif cur is self.isi:
-            self.isi_sim.submit(self.controls.request(compare=compare))
+    def _wanted(self, compare: bool) -> Request:
+        req = self.controls.request(compare=compare)
+        # La curva del metodo contrario (LMS <-> RLS) cuesta una segunda
+        # corrida entera y solo se dibuja en el receptor.
+        if self._view() != "bench" or req.eq_kind not in ("lms", "rls"):
+            req.compare = False
+        return req
+
+    def _covers(self, done: Request) -> bool:
+        """El resultado `done` sirve para lo que pide ahora el rail."""
+        want = self._wanted(True)
+        if done.n_payload != FULL_SYMBOLS or (want.compare and not done.compare):
+            return False
+        return replace(done, seq=0, compare=False) == replace(want, seq=0, compare=False)
+
+    def _run(self, compare: bool, preview: bool = False) -> None:
+        key = self._view()
+        req = self._wanted(compare)
+        if preview:
+            req = replace(req, n_payload=PREVIEW_SYMBOLS, compare=False)
+        if key in LIVE:
+            self.sim.submit(req)
+        elif key == "isi":
+            self.isi_sim.submit(req)
         else:
             return
         self._update_spec()
 
     def _on_result(self, res) -> None:
-        self.bench.apply(res)
+        # Solo se dibuja la vista visible; las otras lo haran al mostrarse.
+        self._last = res
+        self._drawn = set()
+        key = self._view()
+        if key in LIVE:
+            self._draw(key)
 
-    def _on_view(self, key: str) -> None:
-        self.stack.setCurrentIndex(VIEW_INDEX[key])
-        # El rail sigue vivo en la campana porque el barrido USA sus valores
-        # (taps, paso, perfil, entrenamiento) para todo salvo el eje que barre.
-        self.controls.set_view(key)
-        # Al volver a una vista se recalcula: el rail pudo cambiar mientras
-        # tanto y la vista no puede enseñar un resultado de otros parámetros.
-        if key in ("bench", "isi"):
-            self._run(compare=True)
+    def _draw(self, key: str) -> None:
+        if key not in self._drawn and self._last is not None:
+            {"gen": self.gen, "chan": self.chan, "bench": self.bench}[key].apply(self._last)
+            self._drawn.add(key)
+
+    def _on_error(self, msg: str) -> None:
+        self.gen.set_error(msg)
+        self.chan.set_error(msg)
+        self.bench.set_error(msg)
 
     def _update_spec(self) -> None:
         from comm2 import SystemParams

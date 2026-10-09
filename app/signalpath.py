@@ -38,8 +38,11 @@ class SignalPath(QWidget):
 
     selected = Signal(str)
 
-    def __init__(self, parent=None):
+    def __init__(self, stages=STAGES, parent=None):
         super().__init__(parent)
+        # Por defecto la cadena entera; la seccion de analisis pasa solo las
+        # etapas del receptor.
+        self.stages = tuple(stages)
         self.setObjectName("PathBar")
         self.setFixedHeight(HEIGHT)
         self.setMouseTracking(True)
@@ -47,7 +50,7 @@ class SignalPath(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
-        self.current = "pll"
+        self.current = self.stages[-1].key
         self._hover = -1
         self._focused = False
         self._open: dict[str, float] = {}
@@ -70,20 +73,20 @@ class SignalPath(QWidget):
 
     # -- geometria -----------------------------------------------------------
     def _cell_w(self) -> float:
-        return self.width() / len(STAGES)
+        return self.width() / len(self.stages)
 
     def _cx(self, i: int) -> float:
         return (i + 0.5) * self._cell_w()
 
     def _index_at(self, x: float) -> int:
-        return max(0, min(len(STAGES) - 1, int(x // self._cell_w())))
+        return max(0, min(len(self.stages) - 1, int(x // self._cell_w())))
 
     # -- interaccion ---------------------------------------------------------
     def mouseMoveEvent(self, e):  # noqa: N802
         i = self._index_at(e.position().x())
         if i != self._hover:
             self._hover = i
-            self.setToolTip(STAGES[i].story)
+            self.setToolTip(self.stages[i].story)
             self.update()
 
     def leaveEvent(self, e):  # noqa: N802
@@ -92,10 +95,10 @@ class SignalPath(QWidget):
 
     def mousePressEvent(self, e):  # noqa: N802
         i = self._index_at(e.position().x())
-        self._select(STAGES[i].key)
+        self._select(self.stages[i].key)
 
     def keyPressEvent(self, e):  # noqa: N802
-        keys = [s.key for s in STAGES]
+        keys = [s.key for s in self.stages]
         i = keys.index(self.current)
         if e.key() in (Qt.Key.Key_Left, Qt.Key.Key_Up):
             i = max(0, i - 1)
@@ -133,8 +136,8 @@ class SignalPath(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         p.fillRect(self.rect(), QColor(T.PANEL))
 
-        n = len(STAGES)
-        cur_i = [s.key for s in STAGES].index(self.current)
+        n = len(self.stages)
+        cur_i = [s.key for s in self.stages].index(self.current)
 
         self._paint_profile(p, cur_i)
         self._paint_connector(p, n, cur_i)
@@ -158,7 +161,7 @@ class SignalPath(QWidget):
     # ---- nodos y rotulos ---------------------------------------------------
     def _paint_nodes(self, p: QPainter, cur_i: int) -> None:
         w = self._cell_w()
-        for i, st in enumerate(STAGES):
+        for i, st in enumerate(self.stages):
             cx = self._cx(i)
             active = i == cur_i
             hover = i == self._hover and not active
@@ -222,7 +225,7 @@ class SignalPath(QWidget):
         p.setPen(QPen(QColor(T.INK_GHOST)))
         p.drawText(QRectF(10, base + 3, self.width() - 20, 14),
                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                   "apertura del ojo  ·  0 a 1  ·  medida en los ocho puntos")
+                   f"apertura del ojo  ·  0 a 1  ·  medida en los {len(self.stages)} puntos")
 
         if not self._live:
             p.setPen(QPen(QColor(T.INK_GHOST)))
@@ -233,7 +236,7 @@ class SignalPath(QWidget):
 
         # escalon: un valor por etapa, constante dentro de su celda
         vals = []
-        for st in STAGES:
+        for st in self.stages:
             v = self._open.get(st.key, float("nan"))
             vals.append(0.0 if (v is None or math.isnan(v)) else max(0.0, min(1.0, v)))
 

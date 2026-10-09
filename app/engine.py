@@ -199,6 +199,11 @@ class SimResult:
     # sobremuestreada del filtro adaptado (ver `_equalize_wave`).
     eye_after: Optional[np.ndarray] = None
     opening_after: float = float("nan")
+    # Secciones de generacion y de canal
+    papr_db: float = float("nan")      # de la forma de onda transmitida
+    h_sym: Optional[np.ndarray] = None # canal equivalente a tasa de simbolo
+    sir_db: float = float("nan")       # ISI del canal sin ecualizar (teorica)
+    peak_distortion: float = float("nan")
 
 
 def _sub(n: int) -> np.ndarray:
@@ -369,6 +374,16 @@ def simulate(req: Request) -> SimResult:
         except Exception:
             lc_ref = None
 
+    # --- generacion y canal: PAPR y canal equivalente a tasa de simbolo -----
+    tx = np.asarray(r.tx_signal)
+    pw = np.abs(tx[np.abs(tx) > 0]) ** 2
+    papr = float(10 * np.log10(pw.max() / pw.mean())) if pw.size else float("nan")
+    from comm2.link import symbol_rate_channel
+    from comm2.pulse import rrc_filter
+    h_sym = symbol_rate_channel(rrc_filter(p.beta, p.span, p.sps),
+                                chan.profile.taps(p.sps), p.sps, phase="cursor")
+    isi = metrics.isi_metrics(h_sym)
+
     ebn0 = req.ebn0_db
     try:
         th = float(mod.ber_theory(np.array([ebn0]))[0])
@@ -386,6 +401,8 @@ def simulate(req: Request) -> SimResult:
         pll_phase=np.asarray(r.sync_info.get("pll_phase", [])),
         channel_taps=np.asarray(r.sync_info.get("channel_taps", [])),
         sps=sps, fs=p.fs, eye_after=eye_after, opening_after=float(opening_after),
+        papr_db=papr, h_sym=h_sym, sir_db=float(isi["sir_db"]),
+        peak_distortion=float(isi["peak_distortion"]),
     )
 
 
