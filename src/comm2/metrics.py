@@ -278,6 +278,17 @@ def spectral_efficiency(bits_per_symbol: int, beta: float) -> float:
     return bits_per_symbol / (1.0 + beta)
 
 
+def shannon_ebn0_db(eta: float) -> float:
+    """Eb/N0 minima [dB] para eficiencia eta [bit/s/Hz]: (2^eta - 1)/eta.
+
+    Es el limite de Shannon en el plano Eb/N0 - eficiencia (Medina (12.123));
+    tiende a -1,6 dB cuando eta -> 0 (12.124). `shannon_limit` da la capacidad
+    en funcion de la SNR, que es otro eje: dibujarla contra Eb/N0 desplaza la
+    curva 10*log10(eta) dB.
+    """
+    return float(10 * np.log10((2.0 ** eta - 1.0) / eta))
+
+
 def shannon_limit(snr_db: float) -> float:
     return float(np.log2(1 + 10 ** (snr_db / 10.0)))
 

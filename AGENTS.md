@@ -307,6 +307,52 @@ Declarado explícitamente para que no se suponga implementado:
 
 ## 9. Estado del árbol de trabajo
 
+**Revisión frente al libro y correcciones (2026-10-09).** Ver
+`docs/revision_trabajo_dake14.md` §9. Puntos que un agente no debe deshacer:
+la sección Canal muestra constelación y ojo en `taps["chan_mf"]` (salida del
+filtro receptor sin corregir: es donde el libro define muestra y ojo; `chan`,
+antes del filtro, daba apertura 0,23 en canal plano a 12 dB). SIR, D y tallos
+del canal salen de `engine.measured_channel` (entrenamiento), no del modelo
+`phase="cursor"` (0,75 dB optimista en `moderate`). PAPR = percentil 99,9 %
+(`engine.papr_ccdf`). `_analyze` mide la convergencia como PRIMERA entrada en
+la banda de 3 dB (la última salida daba 4146 o −1 según la semilla). Shannon
+del exp. 5 = `metrics.shannon_ebn0_db` (12.123). Sin flecha PLL → ecualizador
+en el diagrama. 39 pruebas pasan.
+
+**GNU Radio vuelve, APARTE de la aplicación (2026-10-08, noche).** Manda sobre
+el punto «GNU Radio ya NO EXISTE» de más abajo. Reparto del equipo: dake14 lleva
+`app/`, Luis lleva `grc/`; se comunican solo por la **corrida** (carpeta con
+`parametros.txt` + señales `.cf32`, ver `grc/FORMATO.md`). `app/` no importa
+nada de `grc/` ni al revés, salvo `generar_corrida.py --json`, que lee el JSON
+de `app/gnuradio_json.py`. Todo en `grc/README.md`. VERIFICADO:
+
+- `grc/validacion_gnuradio.grc` (qt_gui, 3 pestañas) compila con `grcc` 3.10.9.2
+  y abre en Companion (`Abrir en GNU Radio.bat`, vía `cwp.py`, trampa 11e).
+  Sus variables salen del bloque Python Module `lector`; al ejecutar sin
+  `--parametros` abre un diálogo para elegir la corrida (solo si existe
+  QApplication: al editar en Companion no la hay). El código del lector vive
+  DENTRO del `.grc`.
+- `Validar GNU Radio.bat` / `grc/validar_gnuradio.py`: compila, ejecuta sin
+  ventanas (`ejecutar_flowgraph.py`, radioconda, `QT_QPA_PLATFORM=offscreen`,
+  `tb.wait()`) y compara. ~6 s.
+- Corrida de ejemplo (B, moderado, QPSK, 12 dB): TX GNU Radio vs Python
+  **−142,9 dB** muestra a muestra (RRC de firdes reescalado a energía 1);
+  BER 6,25·10⁻⁴ (5/8000) en ambos; EVM 30,8 % / 31,5 %.
+- (2026-10-09) El receptor de GNU Radio lleva un Embedded Python Block
+  Schmidl-Cox (`cfo_grueso`, mismo estimador que `sync.schmidl_cox`) y NLMS
+  con paso 0,2. VERIFICADO en seis corridas: escenario C engancha (0/8000,
+  CFO 379,3 Hz estimado para 375) y 16-QAM 6/16000 frente a 0 de Python
+  (antes 992). Todas con IC 95 % solapados; A a 8 dB y h a mano siguen ~2
+  puntos de EVM peor. El FLL Band-Edge se probó y se descartó (lo sesga la
+  ISI). Trampas (umbral del Correlation Estimator, `marca = 1 + eq_taps//2`,
+  relleno de ceros) en `grc/README.md`. El flowgraph se ordena en franjas con
+  bloques Note y Virtual Sink/Source.
+- `grc/tx_qpsk_canal.grc`, `rx_qpsk_desde_python.grc`, `grc/io/` y
+  `experiments/exp6_validacion_grc.py` se **borraron** el 2026-10-09: los
+  sustituye `grc/validacion_gnuradio.grc` con `grc/validar_gnuradio.py`. Las
+  menciones a `exp6` y a esos `.grc` en las secciones 2, 5, 7 y 8 son
+  historia.
+
 **Sesión de secciones (2026-10-08):** la ventana pasa a 4 secciones
 (`window.SECTIONS`): 1 Generación (`sections.GenView`), 2 Canal
 (`sections.ChanView`), 3 Análisis (`sections.AnalysisView` con sub-pestañas

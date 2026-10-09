@@ -99,12 +99,17 @@ def main():
     for x in xs3[:-1]:
         flecha(ax, x + W, fila3 + (H + 1.2) / 2, x + 18, fila3 + (H + 1.2) / 2)
 
-    # realimentaciones
-    ax.annotate("", xy=(27, fila3 + H + 1.2), xytext=(45, fila3 + H + 1.2),
-                arrowprops=dict(arrowstyle="-|>", color="#999", lw=1.0,
-                                connectionstyle="arc3,rad=0.55", ls="--"))
-    ax.text(36, fila3 + H + 5.6, "error dirigido por decision", fontsize=6.8,
-            color="#666", ha="center", style="italic")
+    # realimentaciones: cada bloque se realimenta con SUS decisiones. No hay
+    # lazo del PLL al ecualizador: link.py ejecuta el ecualizador completo y
+    # despues el PLL sobre su salida (antes se dibujaba una flecha PLL -> ecualizador).
+    top = fila3 + H + 1.2
+    for x0 in (xs3[0], xs3[1]):
+        # a la derecha de la caja: en el centro baja la flecha del sincronismo
+        ax.annotate("", xy=(x0 + 0.62 * W, top), xytext=(x0 + 0.95 * W, top),
+                    arrowprops=dict(arrowstyle="-|>", color="#999", lw=1.0,
+                                    connectionstyle="arc3,rad=0.9", ls="--"))
+        ax.text(x0 + 0.785 * W, top + 3.4, "sus decisiones", fontsize=6.6,
+                color="#666", ha="center", style="italic")
 
     # nota lateral
     ax.text(2, 18.0,

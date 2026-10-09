@@ -200,9 +200,11 @@ class SimResult:
     eye_after: Optional[np.ndarray] = None
     opening_after: float = float("nan")
     # Secciones de generacion y de canal
-    papr_db: float = float("nan")      # de la forma de onda transmitida
+    papr_db: float = float("nan")      # PAPR al 99,9 % de la CCDF (ver `papr_ccdf`)
+    papr_peak_db: float = float("nan") # maximo de la trama: crece con su longitud
     h_sym: Optional[np.ndarray] = None # canal equivalente a tasa de simbolo
-    sir_db: float = float("nan")       # ISI del canal sin ecualizar (teorica)
+    h_sym_source: str = ""             # "medido" (con el entrenamiento) o "modelo"
+    sir_db: float = float("nan")       # ISI del canal sin ecualizar
     peak_distortion: float = float("nan")
 
 
@@ -261,6 +263,51 @@ def _equalize_wave(x: np.ndarray, w: np.ndarray, ref_tap: int, sps: int) -> np.n
     return full[lead: lead + x.size]
 
 
+def papr_ccdf(tx: np.ndarray, prob: float = 1e-3) -> tuple[float, float]:
+    """(PAPR al percentil 1 - prob de la CCDF, PAPR de pico), en dB.
+
+    El maximo de una trama es el maximo de una muestra aleatoria y crece con
+    su longitud (0,3 dB entre 1000 y 20 000 simbolos con beta = 0,2): el
+    percentil 99,9 % no depende de cuanto se simule y es el que se usa para
+    dimensionar el amplificador. Se mide sobre la salida del RRC, como pide el
+    libro (Medina, lib 280). Las muestras nulas de la guarda se descartan.
+    """
+    tx = np.asarray(tx)
+    pw = np.abs(tx[np.abs(tx) > 0]) ** 2
+    if not pw.size:
+        return float("nan"), float("nan")
+    m = pw.mean()
+    return (float(10 * np.log10(np.quantile(pw, 1.0 - prob) / m)),
+            float(10 * np.log10(pw.max() / m)))
+
+
+def measured_channel(r) -> tuple[Optional[np.ndarray], str]:
+    """Canal a tasa de simbolo que ve el receptor, medido con el entrenamiento.
+
+    Es el procedimiento del libro (Medina, lib 285): con la secuencia conocida
+    se estima la respuesta muestreada H_t·H_c·H_r. El modelo
+    `symbol_rate_channel(phase="cursor")` acierta con ecos a multiplos de T
+    pero con ecos fraccionales (perfil moderado) daba una SIR 0,75 dB
+    optimista. Los coeficientes por debajo de 3 desviaciones del error de
+    estimacion se descartan: si no, el ruido de estimacion de los 17
+    coeficientes se sumaria a la distorsion de pico.
+    """
+    if not r.locked:
+        return None, ""
+    tr = r.frame.training
+    rx = np.asarray(r.sym_pre_eq[: tr.size])
+    if rx.size < tr.size or not np.all(np.isfinite(rx)):
+        return None, ""
+    c, resid = metrics.estimate_symbol_channel(rx, tr, n_pre=8, n_post=8)
+    sigma = np.sqrt(resid / tr.size)
+    keep = np.abs(c) > max(3 * sigma, 0.02 * np.max(np.abs(c)))
+    if not np.any(keep):
+        return None, ""
+    nz = np.where(keep)[0]
+    c = np.where(keep, c, 0)[nz[0]: nz[-1] + 1]
+    return c / np.linalg.norm(c), "medido"
+
+
 def simulate(req: Request) -> SimResult:
     t0 = time.perf_counter()
     p, chan, rx = build(req)
@@ -302,9 +349,15 @@ def simulate(req: Request) -> SimResult:
     # --- puntos sobremuestreados -------------------------------------------
     sps = p.sps
     eye_after, opening_after = None, float("nan")
+    # "chan_mf" es la senal del canal vista donde el libro define la muestra y
+    # el ojo: a la salida del filtro receptor (Medina (9.8)-(9.9), lib 281),
+    # SIN ninguna correccion (ni CFO ni fase). Antes del filtro, "chan" lleva
+    # el ruido de toda la banda de muestreo (sps veces mas) y la ISI propia del
+    # RRC, y en canal plano a 12 dB su ojo salia casi cerrado (0,23 frente a 0,71).
     wave_src = {
         "rrc": r.tx_signal,
         "chan": r.rx_signal,
+        "chan_mf": r.mf_out,
         "mf": r.sync_info.get("mf_sync", r.mf_out),
     }
     for key, w in wave_src.items():
@@ -375,13 +428,14 @@ def simulate(req: Request) -> SimResult:
             lc_ref = None
 
     # --- generacion y canal: PAPR y canal equivalente a tasa de simbolo -----
-    tx = np.asarray(r.tx_signal)
-    pw = np.abs(tx[np.abs(tx) > 0]) ** 2
-    papr = float(10 * np.log10(pw.max() / pw.mean())) if pw.size else float("nan")
-    from comm2.link import symbol_rate_channel
-    from comm2.pulse import rrc_filter
-    h_sym = symbol_rate_channel(rrc_filter(p.beta, p.span, p.sps),
-                                chan.profile.taps(p.sps), p.sps, phase="cursor")
+    papr, papr_peak = papr_ccdf(r.tx_signal)
+    h_sym, h_src = measured_channel(r)
+    if h_sym is None:
+        from comm2.link import symbol_rate_channel
+        from comm2.pulse import rrc_filter
+        h_sym = symbol_rate_channel(rrc_filter(p.beta, p.span, p.sps),
+                                    chan.profile.taps(p.sps), p.sps, phase="cursor")
+        h_src = "modelo"
     isi = metrics.isi_metrics(h_sym)
 
     ebn0 = req.ebn0_db
@@ -401,7 +455,8 @@ def simulate(req: Request) -> SimResult:
         pll_phase=np.asarray(r.sync_info.get("pll_phase", [])),
         channel_taps=np.asarray(r.sync_info.get("channel_taps", [])),
         sps=sps, fs=p.fs, eye_after=eye_after, opening_after=float(opening_after),
-        papr_db=papr, h_sym=h_sym, sir_db=float(isi["sir_db"]),
+        papr_db=papr, papr_peak_db=papr_peak, h_sym=h_sym, h_sym_source=h_src,
+        sir_db=float(isi["sir_db"]),
         peak_distortion=float(isi["peak_distortion"]),
     )
 

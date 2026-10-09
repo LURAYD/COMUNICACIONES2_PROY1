@@ -1,0 +1,1315 @@
+options:
+  parameters:
+    author: Comunicaciones II 2026 - Proyecto 1
+    title: Validación cruzada Python - GNU Radio
+    description: Lee una corrida (parametros.txt + señales) y la reproduce en GNU Radio
+    comment: ''
+    id: validacion_gnuradio
+    generate_options: qt_gui
+    output_language: python
+    run_options: prompt
+    run: 'True'
+    run_command: '{python} -u {filename}'
+    window_size: (1300, 900)
+    sizing_mode: fixed
+    placement: (0,0)
+    catch_exceptions: 'True'
+    category: '[GRC Hier Blocks]'
+    qt_qss_theme: ''
+    realtime_scheduling: ''
+    thread_safe_setters: ''
+    max_nouts: '0'
+    hier_block_src_path: '.:'
+    gen_linking: dynamic
+    gen_cmake: 'On'
+    cmake_opt: ''
+    copyright: ''
+  states:
+    coordinate:
+    - 1680
+    - 2560
+    rotation: 0
+    state: enabled
+blocks:
+- name: titulo_0
+  id: note
+  parameters:
+    note: 0 · CONFIGURACIÓN
+    comment: |-
+      de dónde salen los valores.
+      parametros: ruta del parametros.txt (vacío = se elige al ejecutar).  lector: lee ese fichero
+      (doble clic para ver el código).  P: el diccionario con todos los valores. El resto de
+      variables sale de P.
+  states:
+    coordinate:
+    - 16
+    - 8
+    rotation: 0
+    state: enabled
+- name: parametros
+  id: parameter
+  parameters:
+    label: parametros.txt (vacío = elegir)
+    type: str
+    value: ''
+    short_id: ''
+    hide: none
+  states:
+    coordinate:
+    - 16
+    - 153
+    rotation: 0
+    state: enabled
+- name: ritmo
+  id: parameter
+  parameters:
+    label: Ritmo
+    type: eng_float
+    value: '0.05'
+    short_id: ''
+    hide: none
+    comment: |-
+      0.05 = 20 veces más lento,
+      para poder verlo
+  states:
+    coordinate:
+    - 16
+    - 293
+    rotation: 0
+    state: enabled
+- name: lector
+  id: epy_module
+  parameters:
+    source_code: |
+      """Lector de la corrida: lee parametros.txt y deja todo listo para los bloques.
+
+      Este código lo ejecuta GNU Radio (con su propio Python), no el proyecto.
+      Solo depende de numpy y de gnuradio. Vive dentro del flowgraph (bloque
+      Python Module «lector»); para cambiarlo, doble clic en ese bloque.
+
+      - ruta(parametros): qué parametros.txt usar. Si el flowgraph se lanza con
+        --parametros, ese; si se ejecuta desde Companion, abre un diálogo para
+        elegirlo (así se cargan corridas nuevas sin tocar el flowgraph).
+      - leer(ruta): diccionario con los valores, ya convertidos a número.
+      """
+
+      import os
+
+      import numpy as np
+
+      # Valores por defecto: los usa Companion mientras se edita el flowgraph (no
+      # hay corrida elegida todavía) para poder mostrar y validar los bloques.
+      DEFECTO = {
+          "modulacion": "qpsk", "fs": 1e6, "sps": 8, "rolloff": 0.35, "span": 10,
+          "zc_len": 64, "n_train": 512, "n_payload": 4000, "guard": 64,
+          "ebn0_db": 12.0, "noise_voltage": 0.0, "cfo_hz": 0.0, "fase_grados": 0.0,
+          "reloj_ppm": 0.0, "retardo_frac": 0.0, "rayleigh": 0,
+          "taps_canal": [1 + 0j], "eq_taps": 21, "eq_mu": 0.5, "semilla": 2026,
+          "escenario": "?", "perfil": "?",
+      }
+
+
+      _avisados = set()
+
+
+      def _aqui():
+          try:
+              return os.path.dirname(os.path.abspath(__file__))
+          except NameError:  # Companion evalúa este código sin __file__
+              return os.getcwd()
+
+
+      def ruta(parametros=""):
+          """Ruta del parametros.txt de la corrida."""
+          if parametros:
+              return os.path.abspath(parametros)
+          inicio = os.path.join(_aqui(), "corridas")
+          # Solo hay QApplication cuando el flowgraph se EJECUTA con interfaz Qt;
+          # mientras Companion edita no la hay y no se abre ningún diálogo.
+          try:
+              from PyQt5 import Qt
+              app = Qt.QApplication.instance()
+          except Exception:
+              app = None
+          if app is not None:
+              f, _ = Qt.QFileDialog.getOpenFileName(
+                  None, "Elige el parametros.txt de la corrida", inicio,
+                  "Parámetros de corrida (parametros.txt);;Texto (*.txt)")
+              if f:
+                  return f
+              print("[lector] No se eligió ninguna corrida: se usa la de ejemplo.")
+          # La de ejemplo, buscada junto al flowgraph o desde la raíz del proyecto
+          # (desde donde lo abre «Abrir en GNU Radio.bat»).
+          # Al editar, Companion no da __file__ ni un directorio fiable, pero su
+          # linea de ordenes lleva la ruta del .grc abierto: la corrida esta al lado.
+          import sys
+          bases = [_aqui(), os.path.join(os.getcwd(), "grc")]
+          bases += [os.path.dirname(os.path.abspath(a)) for a in sys.argv if a.endswith(".grc")]
+          for base in bases:
+              f = os.path.join(base, "corridas", "ejemplo", "parametros.txt")
+              if os.path.isfile(f):
+                  return f
+          return os.path.join(inicio, "ejemplo", "parametros.txt")
+
+
+      def _valor(v):
+          if "," in v:
+              try:
+                  return [complex(x) for x in v.split(",") if x.strip()]
+              except ValueError:
+                  return v
+          for conv in (int, float, complex):
+              try:
+                  return conv(v)
+              except ValueError:
+                  pass
+          return v
+
+
+      def leer(ruta_txt):
+          """Diccionario con los parámetros de la corrida."""
+          P = dict(DEFECTO)
+          P["carpeta"] = os.path.dirname(os.path.abspath(ruta_txt))
+          if not os.path.isfile(ruta_txt):
+              # Companion evalúa las variables muchas veces al editar: avisar una.
+              if ruta_txt not in _avisados:
+                  _avisados.add(ruta_txt)
+                  print("[lector] No existe %s: se usan valores por defecto." % ruta_txt)
+              P["valida"] = False
+              return P
+          with open(ruta_txt, encoding="utf-8") as fh:
+              for linea in fh:
+                  linea = linea.split("#", 1)[0].strip()
+                  if "=" in linea:
+                      k, v = linea.split("=", 1)
+                      P[k.strip()] = _valor(v.strip())
+          if not isinstance(P["taps_canal"], list):   # un solo coeficiente
+              P["taps_canal"] = [complex(P["taps_canal"])]
+          P["valida"] = True
+          os.makedirs(os.path.join(P["carpeta"], "gnuradio"), exist_ok=True)
+          if ruta_txt in _avisados:
+              return P
+          _avisados.add(ruta_txt)
+          print("[lector] Corrida: %s" % P["carpeta"])
+          print("[lector]   escenario %s, canal %s, %s, Eb/N0 = %s dB, ruido v = %.4f"
+                % (P["escenario"], P["perfil"], str(P["modulacion"]).upper(),
+                   P["ebn0_db"], P["noise_voltage"]))
+          if P["retardo_frac"] or P["rayleigh"]:
+              print("[lector]   AVISO: retardo fraccional y Rayleigh no se reproducen en GNU Radio.")
+          return P
+
+
+      def archivo(P, nombre):
+          """Fichero de entrada de la corrida (lo escribió Python)."""
+          return os.path.join(P["carpeta"], nombre)
+
+
+      def n_muestras(P, nombre):
+          """Longitud en muestras complex64 de un fichero de la corrida."""
+          f = archivo(P, nombre)
+          return max(os.path.getsize(f) // 8, 1) if os.path.isfile(f) else 1
+
+
+      def salida(P, nombre):
+          """Fichero que escribe GNU Radio, en la subcarpeta gnuradio/."""
+          return os.path.join(P["carpeta"], "gnuradio", nombre)
+
+
+      def rrc(P):
+          """RRC de GNU Radio con span*sps+1 coeficientes y energía 1, como en Python.
+
+          firdes normaliza a ganancia en continua 1 (suma = 1); Python normaliza a
+          energía 1 (suma de cuadrados = 1). Se reescala para que las dos señales
+          tengan la misma potencia y el mismo noise_voltage signifique lo mismo.
+          """
+          from gnuradio.filter import firdes
+          sps, span = int(P["sps"]), int(P["span"])
+          h = np.array(firdes.root_raised_cosine(1.0, sps, 1.0, P["rolloff"], span * sps + 1))
+          return list(h / np.sqrt(np.sum(h ** 2)))
+
+
+      def rrc_polifase(P, nfilts):
+          """Filtro adaptado para el Polyphase Clock Sync (interpolado por nfilts).
+
+          Cada rama se escala a energía 1, como el filtro adaptado de Python: así
+          un símbolo de energía 1 sale con amplitud 1 y el umbral del Correlation
+          Estimator no depende de la normalización de firdes.
+          """
+          from gnuradio.filter import firdes
+          sps, span = int(P["sps"]), int(P["span"])
+          h = np.array(firdes.root_raised_cosine(nfilts, nfilts * sps, 1.0, P["rolloff"],
+                                                 (span * sps + 1) * nfilts))
+          return list(h / np.sqrt(np.sum(h[::nfilts] ** 2)))
+
+
+      def giro(P):
+          """Fase fija del canal como factor complejo."""
+          return complex(np.exp(1j * np.radians(P["fase_grados"])))
+
+
+      def entrenamiento(P):
+          """Secuencia de entrenamiento: la sacan de simbolos_tx.cf32."""
+          f = archivo(P, "simbolos_tx.cf32")
+          if not os.path.isfile(f):
+              return [1 + 0j] * 64
+          s = np.fromfile(f, dtype=np.complex64)
+          i0 = int(P["guard"]) + 2 * int(P["zc_len"])
+          return [complex(x) for x in s[i0: i0 + int(P["n_train"])]]
+
+
+      def constelacion(P):
+          """Constelación de decisión, la misma de Python (energía media 1)."""
+          from gnuradio import digital
+          m = {"bpsk": 2, "qpsk": 4, "8psk": 8, "16qam": 16, "64qam": 64}[str(P["modulacion"]).lower()]
+          if str(P["modulacion"]).endswith("qam"):
+              L = int(round(np.sqrt(m)))
+              niv = 2 * np.arange(L) - (L - 1)
+              pts = (niv[:, None] + 1j * niv[None, :]).ravel()
+              rot = 4
+          else:
+              pts = np.exp(1j * (2 * np.pi * np.arange(m) / m + (np.pi / 4 if m == 4 else 0)))
+              rot = m
+          pts = pts / np.sqrt(np.mean(np.abs(pts) ** 2))
+          return digital.constellation_calcdist(list(pts), list(range(m)), rot, 1,
+                                                digital.constellation.POWER_NORMALIZATION).base()
+
+
+      def orden_costas(P):
+          return {"bpsk": 2, "8psk": 8}.get(str(P["modulacion"]).lower(), 4)
+  states:
+    coordinate:
+    - 260
+    - 153
+    rotation: 0
+    state: enabled
+- name: P
+  id: variable
+  parameters:
+    value: lector.leer(lector.ruta(parametros))
+  states:
+    coordinate:
+    - 260
+    - 253
+    rotation: 0
+    state: enabled
+- name: pestanas
+  id: qtgui_tab_widget
+  parameters:
+    num_tabs: '3'
+    label0: 1 · Transmisor
+    label1: 2 · Canal
+    label2: 3 · Receptor
+    gui_hint: ''
+  states:
+    coordinate:
+    - 260
+    - 333
+    rotation: 0
+    state: enabled
+- name: samp_rate
+  id: variable
+  parameters:
+    value: float(P['fs'])
+    comment: Hz
+  states:
+    coordinate:
+    - 480
+    - 153
+    rotation: 0
+    state: enabled
+- name: sps
+  id: variable
+  parameters:
+    value: int(P['sps'])
+    comment: muestras por símbolo
+  states:
+    coordinate:
+    - 480
+    - 253
+    rotation: 0
+    state: enabled
+- name: rrc_tx
+  id: variable
+  parameters:
+    value: lector.rrc(P)
+    comment: RRC, energía 1
+  states:
+    coordinate:
+    - 480
+    - 353
+    rotation: 0
+    state: enabled
+- name: noise_v
+  id: variable
+  parameters:
+    value: float(P['noise_voltage'])
+    comment: σ del ruido complejo
+  states:
+    coordinate:
+    - 720
+    - 153
+    rotation: 0
+    state: enabled
+- name: f_off
+  id: variable
+  parameters:
+    value: float(P['cfo_hz']) / samp_rate
+    comment: CFO, ciclos/muestra
+  states:
+    coordinate:
+    - 720
+    - 253
+    rotation: 0
+    state: enabled
+- name: epsilon
+  id: variable
+  parameters:
+    value: 1.0 + float(P['reloj_ppm']) * 1e-6
+    comment: razón de relojes
+  states:
+    coordinate:
+    - 720
+    - 353
+    rotation: 0
+    state: enabled
+- name: giro
+  id: variable
+  parameters:
+    value: lector.giro(P)
+    comment: fase fija
+  states:
+    coordinate:
+    - 960
+    - 153
+    rotation: 0
+    state: enabled
+- name: ch_taps
+  id: variable
+  parameters:
+    value: P['taps_canal']
+    comment: canal a tasa de muestreo
+  states:
+    coordinate:
+    - 960
+    - 253
+    rotation: 0
+    state: enabled
+- name: nfilts
+  id: variable
+  parameters:
+    value: '32'
+    comment: ramas polifásicas
+  states:
+    coordinate:
+    - 1200
+    - 153
+    rotation: 0
+    state: enabled
+- name: rrc_rx
+  id: variable
+  parameters:
+    value: lector.rrc_polifase(P, nfilts)
+    comment: filtro adaptado
+  states:
+    coordinate:
+    - 1200
+    - 253
+    rotation: 0
+    state: enabled
+- name: entrenamiento
+  id: variable
+  parameters:
+    value: lector.entrenamiento(P)
+    comment: secuencia conocida
+  states:
+    coordinate:
+    - 1200
+    - 353
+    rotation: 0
+    state: enabled
+- name: eq_taps
+  id: variable
+  parameters:
+    value: int(P['eq_taps'])
+    comment: taps del ecualizador
+  states:
+    coordinate:
+    - 1440
+    - 153
+    rotation: 0
+    state: enabled
+- name: marca
+  id: variable
+  parameters:
+    value: 1 + eq_taps // 2
+    comment: tap de referencia al centro
+  states:
+    coordinate:
+    - 1440
+    - 253
+    rotation: 0
+    state: enabled
+- name: paso_nlms
+  id: variable
+  parameters:
+    value: '0.2'
+    comment: medido en 6 escenarios
+  states:
+    coordinate:
+    - 1440
+    - 353
+    rotation: 0
+    state: enabled
+- name: algoritmo
+  id: variable_adaptive_algorithm
+  parameters:
+    type: nlms
+    cons: lector.constelacion(P)
+    step_size: paso_nlms
+    modulus: '2'
+    ffactor: '0.99'
+    delta: '10.0'
+    comment: NLMS
+  states:
+    coordinate:
+    - 1680
+    - 153
+    rotation: 0
+    state: enabled
+- name: n_rx
+  id: variable
+  parameters:
+    value: lector.n_muestras(P, 'senal_rx.cf32')
+    comment: muestras de senal_rx
+  states:
+    coordinate:
+    - 1680
+    - 283
+    rotation: 0
+    state: enabled
+- name: relleno
+  id: variable
+  parameters:
+    value: (int(P['n_train']) + 512) * sps
+    comment: ceros finales
+  states:
+    coordinate:
+    - 1680
+    - 373
+    rotation: 0
+    state: enabled
+- name: titulo_1
+  id: note
+  parameters:
+    note: 1 · TRANSMISOR
+    comment: |-
+      GNU Radio conforma los MISMOS símbolos que Python.
+      Símbolos (preámbulo + entrenamiento + datos) → filtro RRC que interpola por sps. Equivale a
+      comm2.pulse.pulse_shape. Resultado: <corrida>/gnuradio/grc_tx.cf32
+  states:
+    coordinate:
+    - 16
+    - 480
+    rotation: 0
+    state: enabled
+- name: fuente_simbolos
+  id: blocks_file_source
+  parameters:
+    file: lector.archivo(P, 'simbolos_tx.cf32')
+    type: complex
+    repeat: 'False'
+    vlen: '1'
+    offset: '0'
+    length: '0'
+    begin_tag: pmt.PMT_NIL
+    comment: símbolos de Python
+  states:
+    coordinate:
+    - 16
+    - 630
+    rotation: 0
+    state: enabled
+- name: ritmo_tx
+  id: blocks_throttle2
+  parameters:
+    type: complex
+    samples_per_second: samp_rate / sps * ritmo
+    vlen: '1'
+    ignoretag: 'True'
+    limit: auto
+    maximum: '0.1'
+  states:
+    coordinate:
+    - 260
+    - 646
+    rotation: 0
+    state: enabled
+- name: filtro_rrc
+  id: interp_fir_filter_xxx
+  parameters:
+    type: ccf
+    interp: sps
+    taps: rrc_tx
+    samp_delay: '0'
+    comment: conformación RRC
+  states:
+    coordinate:
+    - 480
+    - 630
+    rotation: 0
+    state: enabled
+- name: guarda_tx
+  id: blocks_file_sink
+  parameters:
+    file: lector.salida(P, 'grc_tx.cf32')
+    type: complex
+    append: 'False'
+    unbuffered: 'False'
+    vlen: '1'
+    comment: señal TX de GNU Radio
+  states:
+    coordinate:
+    - 960
+    - 620
+    rotation: 0
+    state: enabled
+- name: a_tx
+  id: virtual_sink
+  parameters:
+    stream_id: tx_grc
+  states:
+    coordinate:
+    - 960
+    - 730
+    rotation: 0
+    state: enabled
+- name: titulo_2
+  id: note
+  parameters:
+    note: 2 · CANAL
+    comment: |-
+      el mismo canal que aplicó Python.
+      Fase fija (Multiply Const) → Channel Model: multitrayecto (taps), CFO, deriva de reloj
+      (epsilon) y ruido AWGN (noise_v). Equivale a comm2.channel.apply_channel. Resultado:
+      grc_rx.cf32
+  states:
+    coordinate:
+    - 16
+    - 840
+    rotation: 0
+    state: enabled
+- name: de_tx
+  id: virtual_source
+  parameters:
+    stream_id: tx_grc
+  states:
+    coordinate:
+    - 16
+    - 1010
+    rotation: 0
+    state: enabled
+- name: fase_canal
+  id: blocks_multiply_const_vxx
+  parameters:
+    type: complex
+    const: giro
+    vlen: '1'
+    comment: fase fija
+  states:
+    coordinate:
+    - 260
+    - 1010
+    rotation: 0
+    state: enabled
+- name: canal
+  id: channels_channel_model
+  parameters:
+    noise_voltage: noise_v
+    freq_offset: f_off
+    epsilon: epsilon
+    taps: ch_taps
+    seed: int(P['semilla'])
+    block_tags: 'False'
+    comment: canal completo
+  states:
+    coordinate:
+    - 480
+    - 990
+    rotation: 0
+    state: enabled
+- name: guarda_rx
+  id: blocks_file_sink
+  parameters:
+    file: lector.salida(P, 'grc_rx.cf32')
+    type: complex
+    append: 'False'
+    unbuffered: 'False'
+    vlen: '1'
+    comment: señal RX de GNU Radio
+  states:
+    coordinate:
+    - 960
+    - 980
+    rotation: 0
+    state: enabled
+- name: a_rx
+  id: virtual_sink
+  parameters:
+    stream_id: rx_grc
+  states:
+    coordinate:
+    - 960
+    - 1090
+    rotation: 0
+    state: enabled
+- name: titulo_3
+  id: note
+  parameters:
+    note: 3 · RECEPTOR
+    comment: |-
+      procesa la MISMA señal recibida que el receptor de Python (senal_rx.cf32): si el resultado difiere, es por el receptor.
+      Ceros finales → corrección de frecuencia (Schmidl-Cox) → filtro adaptado + temporización →
+      busca la trama → ecualizador entrenado → lazo de fase. Resultado: grc_simbolos_rx.cf32
+  states:
+    coordinate:
+    - 16
+    - 1200
+    rotation: 0
+    state: enabled
+- name: fuente_rx
+  id: blocks_file_source
+  parameters:
+    file: lector.archivo(P, 'senal_rx.cf32')
+    type: complex
+    repeat: 'False'
+    vlen: '1'
+    offset: '0'
+    length: '0'
+    begin_tag: pmt.PMT_NIL
+    comment: señal recibida de Python
+  states:
+    coordinate:
+    - 16
+    - 1350
+    rotation: 0
+    state: enabled
+- name: ceros
+  id: blocks_null_source
+  parameters:
+    type: complex
+    vlen: '1'
+    num_outputs: '1'
+    bus_structure_source: '[[0,],]'
+  states:
+    coordinate:
+    - 16
+    - 1500
+    rotation: 0
+    state: enabled
+- name: con_relleno
+  id: blocks_stream_mux
+  parameters:
+    type: complex
+    lengths: (n_rx, relleno)
+    num_inputs: '2'
+    vlen: '1'
+    comment: |-
+      señal + ceros
+      (vacía el correlador)
+  states:
+    coordinate:
+    - 260
+    - 1390
+    rotation: 0
+    state: enabled
+- name: ritmo_rx
+  id: blocks_throttle2
+  parameters:
+    type: complex
+    samples_per_second: samp_rate * ritmo
+    vlen: '1'
+    ignoretag: 'True'
+    limit: auto
+    maximum: '0.1'
+  states:
+    coordinate:
+    - 480
+    - 1386
+    rotation: 0
+    state: enabled
+- name: cfo_grueso
+  id: epy_block
+  parameters:
+    _source_code: |
+      """Schmidl-Cox: corrección gruesa de frecuencia con el preámbulo [ZC | ZC].
+
+      Es el mismo estimador que usa el receptor de Python (comm2.sync.schmidl_cox):
+
+          P(d) = Σ r*[d+m]·r[d+m+L]          (L = zc_len·sps, las dos mitades)
+          M(d) = |P(d)|² / (Ra(d)·Rb(d))      (normalizado con las dos energías)
+          CFO  = arg P(d*) · fs / (2π·L)      en el centro de la meseta de M
+
+      Como el preámbulo está al principio de la ráfaga, el bloque retiene las
+      primeras muestras (guarda + preámbulo + margen), estima el CFO sobre la señal
+      pasada por el filtro adaptado y a partir de ahí deja pasar TODA la señal
+      girada en sentido contrario, con fase continua. Rango: |CFO| < fs / (2L).
+      """
+
+      import numpy as np
+      from gnuradio import gr
+
+
+      class blk(gr.basic_block):
+          def __init__(self, fs=1e6, sps=8, zc_len=64, guard=64, rolloff=0.35, margen=256):
+              gr.basic_block.__init__(self, name="Schmidl-Cox (CFO grueso)",
+                                      in_sig=[np.complex64], out_sig=[np.complex64])
+              self.fs = float(fs)
+              self.sps = int(sps)
+              self.L = int(zc_len) * int(sps)
+              self.rolloff = float(rolloff)
+              self.necesita = (int(guard) + 2 * int(zc_len) + int(margen)) * int(sps)
+              self.acumulado = []
+              self.n_acum = 0
+              self.pendiente = None      # muestras retenidas que aun hay que sacar
+              self.cfo_hz = 0.0
+              self.n = 0                 # muestras ya giradas (fase continua)
+
+          def _estimar(self, r):
+              from gnuradio.filter import firdes
+              h = np.array(firdes.root_raised_cosine(1.0, self.sps, 1.0, self.rolloff,
+                                                     10 * self.sps + 1))
+              r = np.convolve(r, h, mode="same")           # filtro adaptado
+              L, n = self.L, r.size - 2 * self.L
+              if n <= 0:
+                  return 0.0
+              cp = np.concatenate([[0], np.cumsum(np.conj(r[:-L]) * r[L:])])
+              ce = np.concatenate([[0], np.cumsum(np.abs(r) ** 2)])
+              P = cp[L:L + n] - cp[:n]
+              Ra = ce[L:L + n] - ce[:n]
+              Rb = ce[2 * L:2 * L + n] - ce[L:L + n]
+              with np.errstate(divide="ignore", invalid="ignore"):
+                  M = np.abs(P) ** 2 / (Ra * Rb)
+              M[~np.isfinite(M)] = 0.0
+              w = max(3, L // 8)
+              Ms = np.convolve(M, np.ones(w) / w, mode="same")
+              pico = int(np.argmax(Ms))
+              lo = hi = pico                                # centro de la meseta (90 %)
+              while lo > 0 and Ms[lo - 1] >= 0.9 * Ms[pico]:
+                  lo -= 1
+              while hi < Ms.size - 1 and Ms[hi + 1] >= 0.9 * Ms[pico]:
+                  hi += 1
+              return float(np.angle(P[(lo + hi) // 2]) * self.fs / (2 * np.pi * L))
+
+          def _girar(self, x):
+              k = self.n + np.arange(x.size)
+              self.n += x.size
+              return (x * np.exp(-2j * np.pi * self.cfo_hz / self.fs * k)).astype(np.complex64)
+
+          def general_work(self, input_items, output_items):
+              x, out = input_items[0], output_items[0]
+              if self.pendiente is None:                    # fase de adquisicion
+                  self.acumulado.append(np.array(x, copy=True))
+                  self.n_acum += len(x)
+                  self.consume(0, len(x))
+                  if self.n_acum < self.necesita:
+                      return 0
+                  r = np.concatenate(self.acumulado)
+                  self.cfo_hz = self._estimar(r[: self.necesita])
+                  print("[Schmidl-Cox] CFO estimado: %.1f Hz" % self.cfo_hz)
+                  self.pendiente = r
+                  self.acumulado = []
+              if self.pendiente.size:                       # primero lo retenido
+                  k = min(len(out), self.pendiente.size)
+                  out[:k] = self._girar(self.pendiente[:k])
+                  self.pendiente = self.pendiente[k:]
+                  return k
+              k = min(len(x), len(out))
+              out[:k] = self._girar(x[:k])
+              self.consume(0, k)
+              return k
+    fs: samp_rate
+    sps: sps
+    zc_len: int(P['zc_len'])
+    guard: int(P['guard'])
+    rolloff: float(P['rolloff'])
+    margen: '256'
+    comment: |-
+      Schmidl-Cox: corrige el CFO
+      con el preámbulo [ZC ZC]
+  states:
+    coordinate:
+    - 720
+    - 1350
+    rotation: 0
+    state: enabled
+- name: sincronismo
+  id: digital_pfb_clock_sync_xxx
+  parameters:
+    type: ccf
+    sps: sps
+    loop_bw: '0.02'
+    taps: rrc_rx
+    filter_size: nfilts
+    init_phase: nfilts / 2
+    max_dev: '1.5'
+    osps: '1'
+    comment: |-
+      filtro adaptado +
+      temporización (Gardner)
+  states:
+    coordinate:
+    - 960
+    - 1350
+    rotation: 0
+    state: enabled
+- name: busca_trama
+  id: digital_corr_est_cc
+  parameters:
+    symbols: entrenamiento
+    sps: '1'
+    mark_delay: marca
+    threshold: '0.3'
+    threshold_method: digital.THRESHOLD_ABSOLUTE
+    comment: |-
+      sincronismo de trama
+      (etiqueta corr_est)
+  states:
+    coordinate:
+    - 1230
+    - 1350
+    rotation: 0
+    state: enabled
+- name: ecualizador
+  id: digital_linear_equalizer
+  parameters:
+    num_taps: eq_taps
+    sps: '1'
+    alg: algoritmo
+    adapt_after_training: 'True'
+    training_sequence: entrenamiento
+    training_start_tag: corr_est
+    comment: |-
+      entrenado, luego
+      dirigido por decisión
+  states:
+    coordinate:
+    - 1500
+    - 1350
+    rotation: 0
+    state: enabled
+- name: lazo_fase
+  id: digital_costas_loop_cc
+  parameters:
+    w: '0.003'
+    order: lector.orden_costas(P)
+    use_snr: 'False'
+    comment: fase, tras el ecualizador
+  states:
+    coordinate:
+    - 1770
+    - 1350
+    rotation: 0
+    state: enabled
+- name: guarda_simbolos
+  id: blocks_file_sink
+  parameters:
+    file: lector.salida(P, 'grc_simbolos_rx.cf32')
+    type: complex
+    append: 'False'
+    unbuffered: 'False'
+    vlen: '1'
+    comment: símbolos de GNU Radio
+  states:
+    coordinate:
+    - 2040
+    - 1340
+    rotation: 0
+    state: enabled
+- name: constelaciones
+  id: qtgui_const_sink_x
+  parameters:
+    type: complex
+    name: '''Receptor de GNU Radio'''
+    size: '2048'
+    grid: 'True'
+    autoscale: 'False'
+    xmin: '-2'
+    xmax: '2'
+    ymin: '-2'
+    ymax: '2'
+    nconnections: '2'
+    update_time: '0.10'
+    tr_mode: qtgui.TRIG_MODE_FREE
+    tr_slope: qtgui.TRIG_SLOPE_POS
+    tr_level: '0.0'
+    tr_chan: '0'
+    tr_tag: ''''''
+    legend: 'True'
+    axislabels: 'True'
+    label1: Antes del ecualizador
+    label2: Después (ecualizador + fase)
+    color1: '''blue'''
+    color2: '''red'''
+    style1: '0'
+    style2: '0'
+    marker1: '0'
+    marker2: '0'
+    width1: '1'
+    width2: '1'
+    alpha1: '0.3'
+    alpha2: '0.8'
+    gui_hint: 'pestanas@2: 0,0,1,1'
+    comment: pestaña 3
+  states:
+    coordinate:
+    - 2040
+    - 1450
+    rotation: 0
+    state: enabled
+- name: titulo_4
+  id: note
+  parameters:
+    note: 4 · COMPARACIÓN
+    comment: |-
+      con Python: gráficas superpuestas (azul GNU Radio, rojo Python).
+      Pestaña 1: espectro y forma de onda transmitidos. Pestaña 2: espectro tras el canal. Si las
+      curvas se tapan, coinciden. La tabla numérica la hace grc/validar_gnuradio.py
+  states:
+    coordinate:
+    - 16
+    - 1600
+    rotation: 0
+    state: enabled
+- name: de_tx_2
+  id: virtual_source
+  parameters:
+    stream_id: tx_grc
+  states:
+    coordinate:
+    - 16
+    - 1750
+    rotation: 0
+    state: enabled
+- name: python_tx
+  id: blocks_file_source
+  parameters:
+    file: lector.archivo(P, 'senal_tx.cf32')
+    type: complex
+    repeat: 'False'
+    vlen: '1'
+    offset: '0'
+    length: '0'
+    begin_tag: pmt.PMT_NIL
+    comment: TX de Python
+  states:
+    coordinate:
+    - 16
+    - 1830
+    rotation: 0
+    state: enabled
+- name: de_tx_3
+  id: virtual_source
+  parameters:
+    stream_id: tx_grc
+  states:
+    coordinate:
+    - 16
+    - 2010
+    rotation: 0
+    state: enabled
+- name: python_tx_b
+  id: blocks_file_source
+  parameters:
+    file: lector.archivo(P, 'senal_tx.cf32')
+    type: complex
+    repeat: 'False'
+    vlen: '1'
+    offset: '0'
+    length: '0'
+    begin_tag: pmt.PMT_NIL
+    comment: TX de Python
+  states:
+    coordinate:
+    - 16
+    - 2090
+    rotation: 0
+    state: enabled
+- name: re_grc
+  id: blocks_complex_to_real
+  parameters:
+    vlen: '1'
+  states:
+    coordinate:
+    - 480
+    - 2025
+    rotation: 0
+    state: enabled
+- name: re_py
+  id: blocks_complex_to_real
+  parameters:
+    vlen: '1'
+  states:
+    coordinate:
+    - 480
+    - 2105
+    rotation: 0
+    state: enabled
+- name: de_rx_2
+  id: virtual_source
+  parameters:
+    stream_id: rx_grc
+  states:
+    coordinate:
+    - 16
+    - 2270
+    rotation: 0
+    state: enabled
+- name: python_rx
+  id: blocks_file_source
+  parameters:
+    file: lector.archivo(P, 'senal_rx.cf32')
+    type: complex
+    repeat: 'False'
+    vlen: '1'
+    offset: '0'
+    length: '0'
+    begin_tag: pmt.PMT_NIL
+    comment: RX de Python
+  states:
+    coordinate:
+    - 16
+    - 2350
+    rotation: 0
+    state: enabled
+- name: espectro_tx
+  id: qtgui_freq_sink_x
+  parameters:
+    name: '''Espectro transmitido'''
+    label1: GNU Radio
+    label2: Python
+    gui_hint: 'pestanas@0: 0,0,1,1'
+    type: complex
+    fftsize: '2048'
+    wintype: window.WIN_BLACKMAN_hARRIS
+    fc: '0'
+    bw: samp_rate
+    grid: 'True'
+    autoscale: 'False'
+    average: '0.1'
+    ymin: '-90'
+    ymax: '10'
+    units: dB
+    update_time: '0.10'
+    legend: 'True'
+    ctrlpanel: 'False'
+    freqhalf: 'True'
+    axislabels: 'True'
+    nconnections: '2'
+    color1: '''blue'''
+    color2: '''red'''
+    width1: '1'
+    width2: '2'
+    alpha1: '1.0'
+    alpha2: '0.6'
+    comment: pestaña 1
+  states:
+    coordinate:
+    - 720
+    - 1750
+    rotation: 0
+    state: enabled
+- name: tiempo_tx
+  id: qtgui_time_sink_x
+  parameters:
+    type: float
+    name: '''Señal transmitida (parte real)'''
+    ylabel: '''Amplitud'''
+    yunit: ''''''
+    size: '400'
+    srate: samp_rate
+    grid: 'True'
+    autoscale: 'False'
+    ymin: '-0.6'
+    ymax: '0.6'
+    nconnections: '2'
+    update_time: '0.10'
+    entags: 'False'
+    tr_mode: qtgui.TRIG_MODE_FREE
+    tr_slope: qtgui.TRIG_SLOPE_POS
+    tr_level: '0.0'
+    tr_delay: '0'
+    tr_chan: '0'
+    tr_tag: ''''''
+    ctrlpanel: 'False'
+    legend: 'True'
+    axislabels: 'True'
+    stemplot: 'False'
+    label1: GNU Radio
+    label2: Python
+    color1: '''blue'''
+    color2: '''red'''
+    width1: '1'
+    width2: '3'
+    style1: '1'
+    style2: '1'
+    marker1: '-1'
+    marker2: '-1'
+    alpha1: '1.0'
+    alpha2: '0.5'
+    gui_hint: 'pestanas@0: 1,0,1,1'
+    comment: pestaña 1
+  states:
+    coordinate:
+    - 720
+    - 2020
+    rotation: 0
+    state: enabled
+- name: espectro_canal
+  id: qtgui_freq_sink_x
+  parameters:
+    name: '''Espectro recibido'''
+    label1: GNU Radio
+    label2: Python
+    gui_hint: 'pestanas@1: 0,0,1,1'
+    type: complex
+    fftsize: '2048'
+    wintype: window.WIN_BLACKMAN_hARRIS
+    fc: '0'
+    bw: samp_rate
+    grid: 'True'
+    autoscale: 'False'
+    average: '0.1'
+    ymin: '-90'
+    ymax: '10'
+    units: dB
+    update_time: '0.10'
+    legend: 'True'
+    ctrlpanel: 'False'
+    freqhalf: 'True'
+    axislabels: 'True'
+    nconnections: '2'
+    color1: '''blue'''
+    color2: '''red'''
+    width1: '1'
+    width2: '2'
+    alpha1: '1.0'
+    alpha2: '0.6'
+    comment: pestaña 2
+  states:
+    coordinate:
+    - 720
+    - 2280
+    rotation: 0
+    state: enabled
+connections:
+- - fuente_simbolos
+  - '0'
+  - ritmo_tx
+  - '0'
+- - ritmo_tx
+  - '0'
+  - filtro_rrc
+  - '0'
+- - filtro_rrc
+  - '0'
+  - guarda_tx
+  - '0'
+- - filtro_rrc
+  - '0'
+  - a_tx
+  - '0'
+- - de_tx
+  - '0'
+  - fase_canal
+  - '0'
+- - fase_canal
+  - '0'
+  - canal
+  - '0'
+- - canal
+  - '0'
+  - guarda_rx
+  - '0'
+- - canal
+  - '0'
+  - a_rx
+  - '0'
+- - fuente_rx
+  - '0'
+  - con_relleno
+  - '0'
+- - ceros
+  - '0'
+  - con_relleno
+  - '1'
+- - con_relleno
+  - '0'
+  - ritmo_rx
+  - '0'
+- - ritmo_rx
+  - '0'
+  - cfo_grueso
+  - '0'
+- - cfo_grueso
+  - '0'
+  - sincronismo
+  - '0'
+- - sincronismo
+  - '0'
+  - busca_trama
+  - '0'
+- - busca_trama
+  - '0'
+  - ecualizador
+  - '0'
+- - ecualizador
+  - '0'
+  - lazo_fase
+  - '0'
+- - lazo_fase
+  - '0'
+  - guarda_simbolos
+  - '0'
+- - busca_trama
+  - '0'
+  - constelaciones
+  - '0'
+- - lazo_fase
+  - '0'
+  - constelaciones
+  - '1'
+- - de_tx_2
+  - '0'
+  - espectro_tx
+  - '0'
+- - python_tx
+  - '0'
+  - espectro_tx
+  - '1'
+- - de_tx_3
+  - '0'
+  - re_grc
+  - '0'
+- - python_tx_b
+  - '0'
+  - re_py
+  - '0'
+- - re_grc
+  - '0'
+  - tiempo_tx
+  - '0'
+- - re_py
+  - '0'
+  - tiempo_tx
+  - '1'
+- - de_rx_2
+  - '0'
+  - espectro_canal
+  - '0'
+- - python_rx
+  - '0'
+  - espectro_canal
+  - '1'
+metadata:
+  file_format: 1
+  grc_version: 3.10.9.2

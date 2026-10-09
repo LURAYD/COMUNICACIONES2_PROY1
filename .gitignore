@@ -10,3 +10,14 @@ latex/
 
 # Claude config
 .claude/
+
+# GNU Radio: lo que genera grcc/Companion y las salidas de cada corrida
+grc/generado/
+grc/validacion_gnuradio.py
+grc/validacion_gnuradio_lector.py
+grc/tx_qpsk_canal.py
+grc/corridas/*/gnuradio/
+grc/corridas/*/comparacion/
+
+# Libro de referencia (escaneado, 124 MB: supera el limite de GitHub)
+Fundamentos de Ingenier*.pdf

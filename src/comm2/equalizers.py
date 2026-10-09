@@ -121,8 +121,14 @@ def _analyze(err2: np.ndarray, n_train: int, adaptive: bool = True,
              diverged: bool = False, check_head: bool = True) -> tuple[np.ndarray, float, int]:
     """Curva de aprendizaje, MSE residual y tiempo de convergencia.
 
-    Convergencia = primer simbolo a partir del cual la curva suavizada se
-    mantiene dentro de 3 dB del MSE de regimen permanente. Se devuelve -1 si:
+    Convergencia = primer simbolo en que la mediana movil de |e|^2 entra en la
+    banda de 3 dB sobre el regimen permanente. Antes se tomaba el ULTIMO
+    simbolo fuera de la banda, y cualquier rafaga de errores de decision al
+    final de la trama lo disparaba: medido en escenario B moderado a 20 dB con
+    cinco semillas, el RLS daba 71/288/54/4146/-1; con la primera entrada da
+    56/53/54/68/62, del orden de 2N-3N que predice la teoria del RLS. Es una
+    sola realizacion: la curva de aprendizaje de la teoria es un promedio de
+    conjunto. Se devuelve -1 si:
       - el ecualizador no es adaptativo (`adaptive=False`: none/zf/mmse), pues
         no hay proceso de convergencia que medir;
       - el filtro diverge (`diverged`, o con `check_head` la curva termina mas de
@@ -143,21 +149,18 @@ def _analyze(err2: np.ndarray, n_train: int, adaptive: bool = True,
     steady = 10 * np.log10(np.mean(err2[-tail:]) + 1e-15)
     if not adaptive:
         return lc, float(steady), -1
-    head = 10 * np.log10(np.mean(err2[:min(32, err2.size)]) + 1e-15)
-    if diverged or not np.isfinite(steady) or (check_head and steady > head + 3.0):
+    # Medianas y no medias: un solo error de decision da un |e|^2 cientos de
+    # veces mayor que el MSE y, con la media, una trama ya convergida parecia
+    # "terminar peor que empezo" (divergencia falsa).
+    head = 10 * np.log10(np.median(err2[:min(32, err2.size)]) + 1e-15)
+    steady_m = 10 * np.log10(np.median(err2[-tail:]) + 1e-15)
+    if diverged or not np.isfinite(steady) or (check_head and steady_m > head + 3.0):
         return lc, float(steady), -1                # diverge: termina peor que empezo
-    # El instante de convergencia se mide sobre una mediana movil, no sobre la
-    # media: un solo error de decision en regimen permanente da un |e|^2 cientos
-    # de veces mayor que el MSE y, con la media, saca la curva de la banda de
-    # 3 dB al final de la trama ("no converge" con el filtro ya convergido).
     from scipy.ndimage import median_filter
     lcm = 10 * np.log10(median_filter(err2, size=65, mode="nearest") + 1e-15)
-    steady_m = 10 * np.log10(np.median(err2[-tail:]) + 1e-15)
-    above = np.where(lcm > steady_m + 3.0)[0]
-    conv = 0 if above.size == 0 else int(above[-1] + 1)
-    if conv >= lcm.size:
-        conv = -1                                   # nunca converge de forma estable
-    return lc, float(steady), int(conv)
+    inside = np.where(lcm <= steady_m + 3.0)[0]
+    conv = int(inside[0]) if inside.size else -1   # -1: nunca entra en la banda
+    return lc, float(steady), conv
 
 
 def flop_count(kind: str, n_taps: int) -> dict:
@@ -269,7 +272,17 @@ CMA_MU_SCALE = 0.1      # factor entre el mu del deslizador (NLMS) y el del CMA
 
 def run_cma(r: np.ndarray, train: np.ndarray, mod: Modulation,
             cfg: EqualizerConfig) -> EqResult:
-    """CMA de Godard (p = 2): ciego, no usa la secuencia de entrenamiento."""
+    """CMA normalizado (variante propia del CMA de Godard, p = 2): ciego.
+
+    No usa la secuencia de entrenamiento. El gradiente de Godard
+    (|y|^2 - R2) y* u se divide por ||u||^2 (CMA normalizado, conocido) y ADEMAS
+    por max(|y|^2, R2), que no es estandar: estabiliza en todo el rango del
+    deslizador, pero pesa distinto cada muestra en la condicion de equilibrio,
+    asi que no es exactamente el CMA de Godard y debe citarse como variante.
+    `err` y la curva de aprendizaje son el error de DISPERSION (|y|^2 - R2)^2,
+    no el error frente al simbolo transmitido: no son comparables con el MSE
+    del LMS/RLS y en QAM no tienden a cero.
+    """
     n, d = cfg.n_taps, cfg.resolved_ref_tap()
     u_all = _regressors(r, n, d)
     w = np.zeros(n, dtype=complex)

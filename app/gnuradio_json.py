@@ -28,7 +28,7 @@ import numpy as np
 from .engine import Request, build
 
 GRC_SNIPPET = """\
-Bloque Import:     import json
+Bloque Import:     import json, cmath
 Variable  cfg:     json.load(open(r"{path}", encoding="utf-8"))
 Variable  samp_rate:   cfg["samp_rate"]
 Variable  sps:         cfg["sps"]
@@ -38,10 +38,18 @@ Variable  constel:     [complex(a, b) for a, b in zip(cfg["constellation_re"], c
 Variable  noise_v:     cfg["noise_voltage"]
 Variable  f_off:       cfg["freq_offset_norm"]
 Variable  epsilon:     cfg["epsilon"]
+Variable  giro:        cmath.exp(1j * cfg["phase_offset_rad"])
 
+Interp FIR Filter: Interpolation = sps · Taps = rrc_taps
+Multiply Const:    Constant = giro     (fase fija: el Channel Model no la tiene)
 Channel Model:     Noise Voltage = noise_v · Frequency Offset = f_off
                    Epsilon = epsilon · Taps = chan_taps
-Interp FIR Filter: Interpolation = sps · Taps = rrc_taps
+
+No se reproducen con estos bloques (lista "_no_reproducible" del JSON): el
+retardo fraccional fijo (timing_offset_samples) y el Rayleigh (rayleigh,
+doppler_hz). El Channel Model retrasa además 3 muestras respecto a Python.
+Para comparar señales y receptores hace falta la corrida completa:
+    .venv\\Scripts\\python grc\\validar_gnuradio.py este_fichero.json
 """
 
 
@@ -110,6 +118,11 @@ def build_config(req: Request) -> dict:
         "epsilon": _f(1.0 + chan.clock_ppm * 1e-6),
         "rayleigh": bool(chan.rayleigh),
         "doppler_hz": _f(chan.fd_hz),
+        # Lo que el Channel Model de GNU Radio no puede aplicar: quien lo use
+        # debe saber que en estos puntos su canal NO es el de Python.
+        "_no_reproducible": [n for n, activo in (
+            ("timing_offset_samples", bool(chan.timing_frac)),
+            ("rayleigh", bool(chan.rayleigh))) if activo],
 
         # -- receptor -------------------------------------------------------
         "equalizer": eq.kind,

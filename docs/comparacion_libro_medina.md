@@ -49,7 +49,7 @@ y el proyecto no).
 | 16 | Constelaciones QPSK, M-PSK, 16-QAM (10.27), (10.30), Fig. 10.35 | `modulation.py` | Bien; etiquetado de bits distinto |
 | 17 | Ambigüedad de fase y preámbulo conocido (lib 321) | `link.coarse_gain_phase`, PLL | Bien |
 | 18 | Multitrayecto y canal selectivo (lib 335–337) | `channel.MultipathProfile` | Bien |
-| 19 | Límite de Shannon en el plano Eb/N0–eficiencia (12.123) | `exp5_modulacion.py` | **Mal**: se dibuja otra curva |
+| 19 | Límite de Shannon en el plano Eb/N0–eficiencia (12.123) | `exp5_modulacion.py` | **Mal**: se dibuja otra curva. *Corregido el 9 oct (`metrics.shannon_ebn0_db`)* |
 
 ---
 

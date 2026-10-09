@@ -1,0 +1,37 @@
+# Corrida para la validación cruzada Python <-> GNU Radio
+# Generada por: grc/generar_corrida.py
+# Fecha: 2026-10-08 21:07:15
+# Formato: clave = valor  (lo que va tras '#' es comentario)
+
+formato        = 1
+escenario      = B
+perfil         = Moderado
+modulacion     = qpsk
+
+# --- Transmisor
+fs             = 1e+06          # Hz, frecuencia de muestreo
+sps            = 8           # muestras por símbolo
+rolloff        = 0.35        # roll-off del RRC
+span           = 10          # duración del RRC en símbolos (span*sps+1 coeficientes, energía 1)
+zc_len         = 64        # cada mitad del preámbulo Zadoff-Chu
+n_train        = 512     # símbolos de entrenamiento
+n_payload      = 4000   # símbolos de datos
+guard          = 64         # ceros antes y después de la ráfaga
+
+# --- Canal (en el orden en que se aplica)
+ebn0_db        = 12
+noise_voltage  = 0.17761719   # desviación típica del ruido complejo = sqrt(1/(k*Eb/N0)); en GNU Radio va tal cual
+cfo_hz         = 0     # desplazamiento de frecuencia
+fase_grados    = 0
+reloj_ppm      = 0  # deriva del reloj de muestreo
+retardo_frac   = 0  # muestras; GNU Radio no lo reproduce
+rayleigh       = 0  # 1 = desvanecimiento variable; GNU Radio no lo reproduce
+n_taps_canal   = 62
+taps_canal     = +0.00000000+0.00000000j,+0.00000000+0.00000000j,-0.00000000+0.00000000j,-0.00000000+0.00000000j,-0.00000000+0.00000000j,+0.00000000+0.00000000j,+0.00002398-0.00004101j,-0.00010047+0.00017179j,+0.00023645-0.00040429j,-0.00043928+0.00075110j,+0.00071686-0.00122573j,-0.00107801+0.00184323j,+0.00153290-0.00262102j,-0.00209387+0.00358019j,+0.00277660-0.00474756j,-0.00360203+0.00615891j,+0.00459941-0.00786429j,-0.00581165+0.00993703j,+0.00730467-0.01248986j,-0.00918545+0.01570571j,+0.80176633-0.01990807j,-0.01497420+0.02570226j,+0.01995882-0.03435904j,-0.02847092+0.04911349j,+0.04713768-0.08130528j,-0.12682661+0.21791924j,-0.19036617+0.32397909j,+0.05407828-0.09038726j,-0.03123838+0.05064907j,+0.02181770-0.03370743j,-0.01674029+0.02401086j,+0.01367353-0.01752188j,+0.03870432-0.27992803j,+0.01067944-0.00886296j,-0.01028842+0.00554522j,+0.01066381-0.00242852j,-0.01215476-0.00090141j,+0.01590761+0.00534265j,-0.02707027-0.01449489j,+0.15445223+0.10285460j,+0.03730693+0.02738222j,-0.01614057-0.01217593j,+0.01009800+0.00751589j,-0.00718949-0.00517571j,+0.00542573+0.00377310j,-0.00419607-0.00287069j,+0.00327742+0.00224220j,-0.00257235-0.00175984j,+0.00201427+0.00137803j,-0.00156406-0.00107003j,+0.00119722+0.00081906j,-0.00089756-0.00061405j,+0.00065384+0.00044731j,-0.00045785-0.00031323j,+0.00030334+0.00020752j,-0.00018527-0.00012675j,+0.00009944+0.00006803j,-0.00004215-0.00002883j,+0.00001004+0.00000687j,+0.00000000+0.00000000j,+0.00000000+0.00000000j,+0.00000000+0.00000000j   # canal a tasa de MUESTREO, ya interpolado
+
+# --- Receptor de Python (el de GNU Radio usa los mismos valores)
+ecualizador    = lms
+eq_taps        = 21
+eq_mu          = 0.5
+semilla        = 2026
+bits_por_simbolo = 2

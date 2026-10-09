@@ -400,6 +400,12 @@ class Convergence(Display):
     def show(self, res: SimResult) -> None:
         name = res.req.eq_kind.upper()
         y = res.learning
+        # El CMA no mide el error frente al simbolo: su curva es el error de
+        # dispersion (|y|^2 - R2)^2, otra magnitud (ver equalizers.run_cma).
+        if res.req.eq_kind == "cma":
+            _label(self.pi, "error de dispersión [dB]", "símbolo")
+        else:
+            _label(self.pi, "MSE [dB]", "símbolo")
         if not y.size:
             self.cur.setData([], [])
             self.ref.setData([], [])

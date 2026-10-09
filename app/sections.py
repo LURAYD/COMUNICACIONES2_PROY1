@@ -108,11 +108,15 @@ class GenView(QWidget):
         self.rs = Readout("Tasa de símbolo", "kBd")
         self.rb = Readout("Tasa de bit", "kb/s")
         self.k = Readout("Bits por símbolo", "")
-        self.bw = Readout("Ancho de banda", "kHz", tip="B = Rs(1 + β)")
+        self.bw = Readout("Ancho de banda RF", "kHz",
+                          tip="B = Rs(1 + β): ancho pasabanda (Medina, Tabla 10.6).\n"
+                              "En banda base real es la mitad, (9.28).")
         self.eta = Readout("Eficiencia", "b/s/Hz", tip="Rb / B = k / (1 + roll-off).")
-        self.papr = Readout("PAPR", "dB",
-                            tip="Relación potencia de pico a potencia media de la\n"
-                                "forma de onda transmitida (con el preámbulo).")
+        self.papr = Readout("PAPR 99,9 %", "dB",
+                            tip="Potencia que solo se supera el 0,1 % del tiempo,\n"
+                                "relativa a la media, sobre la salida del RRC (Medina,\n"
+                                "lib 280). El máximo de la trama crece con su longitud;\n"
+                                "el percentil no.")
         root.addWidget(_Readouts([self.rs, self.rb, self.k, self.bw, self.eta, self.papr]))
 
     def apply(self, res: SimResult) -> None:
@@ -123,10 +127,14 @@ class GenView(QWidget):
         self.const.show_tap(tx.pts, SYMBOL, animate=False)
         self.p_const.set_note(f"{res.req.mod.upper()}  ·  {res.ideal.size} puntos")
 
+        # El RRC del transmisor es solo la mitad del pulso de Nyquist (Medina,
+        # (9.23)-(9.25)): su ojo no puede estar limpio y su apertura no es una
+        # medida de calidad. Sin semaforo; el ojo se abre tras el filtro adaptado.
         rrc = res.taps["rrc"]
         self.eye.set_caption("")
         self.eye.show_wave(rrc.wave, res.sps, rrc.opening)
-        self.p_eye.set_note(f"apertura {rrc.opening:.3f}", _col(rrc.opening))
+        self.p_eye.set_note("medio pulso de Nyquist: se abre tras el filtro adaptado",
+                            T.INK_DIM)
 
         self.spec.show(res.psd, res.req.beta, rx=False)
         self.p_spec.set_note(f"B = {1.0 + res.req.beta:.2f} Rs")
@@ -138,6 +146,9 @@ class GenView(QWidget):
         self.bw.set(f"{p.bw / 1e3:.1f}")
         self.eta.set(f"{p.spectral_efficiency:.2f}")
         self.papr.set(f"{res.papr_db:.2f}" if math.isfinite(res.papr_db) else "--")
+        if math.isfinite(res.papr_peak_db):
+            self.papr.setToolTip(self.papr.toolTip().split("\n\nPico")[0]
+                                 + f"\n\nPico de esta trama: {res.papr_peak_db:.2f} dB")
 
     def set_error(self, msg: str) -> None:
         self.p_const.set_note(msg[:60], T.CRITICAL)
@@ -155,16 +166,17 @@ class ChanView(QWidget):
         root.setSpacing(0)
         center, _cv, grid = _body(SectionHead(
             "2", "Configuración del canal",
-            "Multitrayecto, ruido y errores de sincronismo. Lo que se ve es la "
-            "señal a la entrada del receptor, antes de corregir nada."))
+            "Multitrayecto, ruido y errores de sincronismo. Constelación y ojo se "
+            "ven tras el filtro receptor, que completa el pulso de Nyquist, sin "
+            "corregir nada más."))
 
         self.p_h = Panel("Respuesta al impulso  ·  canal equivalente a tasa de símbolo")
         self.stems = Stems()
         self.p_h.set_content(self.stems)
-        self.p_const = Panel("Constelación  ·  tras el canal")
+        self.p_const = Panel("Constelación  ·  tras el canal y el filtro receptor")
         self.const = Constellation()
         self.p_const.set_content(self.const)
-        self.p_eye = Panel("Diagrama de ojo  ·  tras el canal")
+        self.p_eye = Panel("Diagrama de ojo  ·  tras el canal y el filtro receptor")
         self.eye = Eye()
         self.p_eye.set_content(self.eye)
         self.p_spec = Panel("Densidad espectral  ·  antes y después del canal")
@@ -177,11 +189,15 @@ class ChanView(QWidget):
         grid.addWidget(self.p_spec, 1, 1)
         root.addWidget(center, 1)
 
-        self.ebn0 = Readout("Eb/N0", "dB")
-        self.esn0 = Readout("Es/N0", "dB")
+        self.ebn0 = Readout("Eb/N0 nominal", "dB",
+                            tip="Con la energía TRANSMITIDA. El libro (12.3) la define\n"
+                                "con la potencia recibida: con ecos fraccionales la\n"
+                                "potencia útil cambia (moderado: ~1 dB menos).")
+        self.esn0 = Readout("Es/N0 nominal", "dB", tip="Es = k·Eb, con la energía transmitida.")
         self.sir = Readout("SIR del canal", "dB",
-                           tip="Potencia del cursor entre potencia de la ISI,\n"
-                               "del canal sin ecualizar.")
+                           tip="Potencia del cursor entre potencia de la ISI, del canal\n"
+                               "sin ecualizar (Medina (9.11)). Medido con la secuencia\n"
+                               "de entrenamiento, como indica el libro (lib 285).")
         self.dist = Readout("Distorsión de pico", "",
                             tip="D = Σ|c_k| / |c_0| fuera del cursor.\n"
                                 "D ≥ 1 cierra el ojo de BPSK aun sin ruido.")
@@ -193,17 +209,22 @@ class ChanView(QWidget):
         req = res.req
         h = res.h_sym if res.h_sym is not None else []
         self.stems.show(h, [], "")
-        self.p_h.set_note("canal plano: sin ISI" if req.scenario == "A"
-                          else f"{len(h)} coeficientes")
+        src = res.h_sym_source or "modelo"
+        self.p_h.set_note("canal plano: sin ISI" if len(h) <= 1
+                          else f"{len(h)} coeficientes  ·  {src}")
 
-        ch = res.taps["chan"]
+        ch = res.taps.get("chan_mf", res.taps["chan"])
         self.const.set_reference(res.ideal)
         self.const.autoscale(ch.pts)
         self.const.show_tap(ch.pts, ch.kind, animate=False)
-        self.p_const.set_note("muestreada en el instante óptimo")
+        has_cfo = req.scenario in ("C", "D")
+        self.p_const.set_note("el CFO la hace girar: aún no se corrige" if has_cfo
+                              else "muestreada en el instante óptimo")
         self.eye.set_caption("")
         self.eye.show_wave(ch.wave, res.sps, ch.opening)
-        self.p_eye.set_note(f"apertura {ch.opening:.3f}", _col(ch.opening))
+        self.p_eye.set_note(f"apertura {ch.opening:.3f}"
+                            + ("  ·  incluye el giro del CFO" if has_cfo else ""),
+                            _col(ch.opening))
         self.spec.show(res.psd, req.beta, rx=True)
         self.p_spec.set_note(f"B = {1.0 + req.beta:.2f} Rs")
 

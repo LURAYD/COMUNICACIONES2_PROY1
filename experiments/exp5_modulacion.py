@@ -117,10 +117,14 @@ def main() -> pd.DataFrame:
         for _, r in sub.iterrows():
             ax.annotate(r["mod"].upper(), (r["ebn0_req_db"], r["eta_bps_hz"]),
                         fontsize=7, xytext=(4, -2), textcoords="offset points")
-    snr = np.linspace(0, 30, 200)
-    ax.plot(snr, [metrics.shannon_limit(s) for s in snr], "k--", lw=1,
-            alpha=0.5, label="limite de Shannon")
-    ax.set_xlim(0, 26); ax.set_ylim(0, 6)
+    # Limite de Shannon en el plano Eb/N0 - eficiencia: Eb/N0 = (2^eta - 1)/eta
+    # (Medina (12.123)). Antes se dibujaba log2(1+SNR) con el eje de Eb/N0
+    # como si fuera SNR, desplazado 10*log10(eta) dB (1,7 dB en QPSK).
+    eta = np.linspace(0.02, 6, 300)
+    ax.plot([metrics.shannon_ebn0_db(e) for e in eta], eta, "k--", lw=1,
+            alpha=0.5, label="limite de Shannon (12.123)")
+    ax.axvline(-1.59, color="0.6", ls=":", lw=0.8)
+    ax.set_xlim(-2, 26); ax.set_ylim(0, 6)
     ax.set_xlabel(f"$E_b/N_0$ para BER = {BER_OBJETIVO:g} [dB]")
     ax.set_ylabel(r"Eficiencia espectral $\eta$ [bit/s/Hz]")
     ax.set_title("Compromiso potencia / eficiencia espectral"); ax.legend(fontsize=7)

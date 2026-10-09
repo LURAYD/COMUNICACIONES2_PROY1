@@ -101,9 +101,11 @@ class ReadoutBar(QWidget):
         self.mse = Readout("MSE residual", "dB",
                            tip="Error cuadrático medio residual en régimen permanente.")
         self.conv = Readout("Convergencia", "simb",
-                            tip="Primer símbolo a partir del cual la curva de MSE suavizada\n"
-                                "se mantiene a menos de 3 dB del MSE de régimen permanente.\n"
-                                "Solo aplica a ecualizadores adaptativos (LMS, RLS, CMA).")
+                            tip="Primer símbolo en que la mediana móvil de |e|² entra a menos\n"
+                                "de 3 dB del régimen permanente. Una sola trama: la teoría usa\n"
+                                "el promedio de muchas, así que varía de una semilla a otra\n"
+                                "(RLS ~50-70, LMS ~120-250 en canal moderado). En el CMA mide\n"
+                                "el error de dispersión. Solo LMS, RLS y CMA.")
         self.cost = Readout("Coste", "mult/simb",
                             tip="Multiplicaciones reales por símbolo del ecualizador.\n"
                                 "LMS es O(N); RLS es O(N²).")

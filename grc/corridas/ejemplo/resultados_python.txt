@@ -1,0 +1,6 @@
+# Resultados del receptor de Python sobre esta misma corrida
+ber            = 6.250000e-04
+ber_errores    = 5
+ber_bits       = 8000
+evm_pct        = 30.8168
+enganchado     = 1

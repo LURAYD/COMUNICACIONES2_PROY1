@@ -109,13 +109,11 @@ Real, generado y versionado — nada aqui es inventado:
 - `results/figures/*.png` y `latex/figures/*.png` — 13 figuras del informe.
 - `results/RESUMEN.md` — tablas de resultados consolidadas.
 - `latex/main.pdf` — el informe tecnico compilado.
-- `grc/tx_qpsk_canal.grc`, `grc/rx_qpsk_desde_python.grc` — flowgraphs escritos
-  para GNU Radio 3.10, verificados estructuralmente pero **nunca ejecutados**:
-  `grc/README.md` documenta que la maquina de desarrollo no tenia GNU Radio.
-  Eso ya no es cierto (radioconda esta instalado), y la ejecucion real esta
-  pendiente de comprobacion.
-- `grc/io/py_tx_signal.cf32`, `grc/io/py_reference.npz` — ficheros de
-  intercambio ya generados.
+- `grc/validacion_gnuradio.grc` — flowgraph de GNU Radio 3.10 (transmisor,
+  canal y receptor), ejecutado y comparado con Python por
+  `grc/validar_gnuradio.py`; resultados en `grc/README.md`.
+- `grc/corridas/ejemplo/` — corrida de intercambio Python ↔ GNU Radio
+  (formato en `grc/FORMATO.md`).
 - `docs/arquitectura.md`, `docs/parametros.md`, `docs/referencias.md`.
 
 Lo que NO existe y no debe fabricarse: la capa de analisis factorial (DOE/ANOVA/

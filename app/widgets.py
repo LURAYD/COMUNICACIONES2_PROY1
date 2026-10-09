@@ -144,9 +144,11 @@ class Readout(QWidget):
         row.addStretch(1)
         v.addLayout(row)
 
-    def set(self, text: str, color: str = T.INK, unit: Optional[str] = None) -> None:
+    def set(self, text: str, color: Optional[str] = None, unit: Optional[str] = None) -> None:
+        # color=None se resuelve aqui y no en la firma: el valor por defecto se
+        # evaluaria al importar y quedaria atado al tema de ese momento (AGENTS 4.4).
         self.value.setText(text)
-        self.value.setStyleSheet(f"color: {color}")
+        self.value.setStyleSheet(f"color: {color or T.INK}")
         if unit is not None:
             self.unit.setText(unit)
 

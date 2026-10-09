@@ -34,6 +34,31 @@ def test_cma_no_diverge_en_todo_el_rango_de_mu(mod, mu):
         assert r.stats["ber"] < 1e-2
 
 
+def test_cma_reduce_la_isi():
+    """En canal plano no hay nada que ecualizar: hay que probarlo con ISI.
+    Medido (B moderado, QPSK, 16 dB, 3 semillas): sin ecualizar 5,7e-2,
+    CMA < 4e-5."""
+    p = SystemParams(mod="qpsk", n_payload=4000)
+    ch = scenarios.scenario_b(p, 16.0, profile="moderate")
+    ber = {eq: run_link(p, ch, ReceiverConfig(eq=EqualizerConfig(kind=eq, mu=0.5))).stats["ber"]
+           for eq in ("none", "cma")}
+    assert ber["none"] > 1e-2
+    assert ber["cma"] < 0.1 * ber["none"]
+
+
+def test_convergencia_estable_entre_semillas():
+    """La teoria del RLS da del orden de 2N iteraciones. Con la definicion
+    anterior (ultima salida de la banda de 3 dB) una semilla daba 4146 y otra
+    -1; con la primera entrada las cinco quedan entre 53 y 68."""
+    conv = []
+    for s in range(3):
+        p = SystemParams(n_payload=4000, seed=2026 + s)
+        r = run_link(p, scenarios.scenario_b(p, 20.0, profile="moderate"),
+                     ReceiverConfig(eq=EqualizerConfig(kind="rls", lam=0.995)))
+        conv.append(r.eq.convergence_symbols)
+    assert all(20 <= c <= 150 for c in conv), conv
+
+
 def test_evm_acotada_sin_cfo_corregido():
     r = _enlace("qpsk", "lms", scen="C", cfo=False)
     assert 0 <= r.stats["evm_pct"] <= 100.0
