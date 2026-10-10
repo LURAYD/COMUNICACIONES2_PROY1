@@ -1,4 +1,4 @@
-"""Generacion de bits y construccion de la trama.
+r"""Generacion de bits y construccion de la trama.
 
 Estructura de la rafaga (Requisito 4.2 de la guia):
 
