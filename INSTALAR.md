@@ -30,3 +30,7 @@ Más detalles en `grc\README.md`.
 - `presentacion`: la presentación
 
 El libro en PDF no va incluido porque pesa demasiado.
+
+---
+
+Esto lo terminé el día del sismo 2026 del 9 de octubre jajaja qué miedo.

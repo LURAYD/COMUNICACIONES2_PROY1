@@ -288,3 +288,7 @@ Toda la campaña es determinista: la semilla base está en `experiments/_common.
 (`BASE.seed = 2026`) y cada realización Monte Carlo deriva su propio generador con
 un desplazamiento explícito, de modo que las tramas son independientes entre sí y
 reproducibles entre ejecuciones.
+
+---
+
+Esto lo terminé el día del sismo 2026 del 9 de octubre jajaja qué miedo.
