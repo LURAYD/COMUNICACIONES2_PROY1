@@ -21,3 +21,6 @@ grc/corridas/*/comparacion/
 
 # Libro de referencia (escaneado, 124 MB: supera el limite de GitHub)
 Fundamentos de Ingenier*.pdf
+
+# Paquetes para entregar (zip)
+dist/
