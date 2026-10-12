@@ -63,13 +63,19 @@ def ejecutar(parametros: Path) -> dict:
         if r.returncode != 0 or not gen.is_file():
             raise SystemExit("grcc falló:\n" + (r.stdout + r.stderr)[-2000:])
     print("  Ejecutando el flowgraph con GNU Radio (sin ventanas)...")
-    r = subprocess.run([str(py), str(AQUI / "ejecutar_flowgraph.py"), str(GENERADO),
-                        "validacion_gnuradio", str(parametros)],
-                       capture_output=True, text=True, encoding="utf-8", errors="replace",
-                       timeout=600)
-    linea = next((l for l in r.stdout.splitlines() if l.startswith("GRCJSON ")), None)
+    # Dos intentos: en una instalacion recien hecha la primera ejecucion de
+    # radioconda a veces termina sin escribir nada (medido en un zip nuevo).
+    for intento in range(2):
+        r = subprocess.run([str(py), str(AQUI / "ejecutar_flowgraph.py"), str(GENERADO),
+                            "validacion_gnuradio", str(parametros)],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           timeout=600)
+        linea = next((l for l in r.stdout.splitlines() if l.startswith("GRCJSON ")), None)
+        if linea is not None:
+            break
     if linea is None:
-        raise SystemExit("El flowgraph no respondió:\n" + (r.stdout + r.stderr)[-2000:])
+        raise SystemExit(f"El flowgraph no respondió (código {r.returncode}):\n"
+                         + (r.stdout + r.stderr)[-2000:])
     res = json.loads(linea[len("GRCJSON "):])
     if not res["ok"]:
         raise SystemExit("El flowgraph falló: " + res["error"])
